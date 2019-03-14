@@ -22,7 +22,12 @@ Licence: GPL
 #define REPRAP_H
 
 #include "RepRapFirmware.h"
+#include "ObjectModel/ObjectModel.h"
 #include "MessageType.h"
+#include "RTOSIface/RTOSIface.h"
+#if SUPPORT_LYNXMOD
+#include "LynxMod/LynxMod.h"
+#endif
 
 enum class ResponseSource
 {
@@ -31,7 +36,21 @@ enum class ResponseSource
 	Generic
 };
 
-class RepRap
+// Message box data
+struct MessageBox
+{
+	bool active;
+	String<MaxMessageLength> message;
+	String<MaxTitleLength> title;
+	int mode;
+	uint32_t seq;
+	uint32_t timer, timeout;
+	AxesBitmap controls;
+
+	MessageBox() : active(false), seq(0) { }
+};
+
+class RepRap INHERIT_OBJECT_MODEL
 {
 public:
 	RepRap();
@@ -40,6 +59,7 @@ public:
 	void Spin();
 	void Exit();
 	void Diagnostics(MessageType mtype);
+	void DeferredDiagnostics(MessageType mtype) { diagnosticsDestination = mtype; }
 	void Timing(MessageType mtype);
 
 	bool Debug(Module module) const;
@@ -67,7 +87,6 @@ public:
 	const Tool* GetFirstTool() const { return toolList; }				// Return the lowest-numbered tool
 	uint32_t GetCurrentXAxes() const;									// Get the current axes used as X axes
 	uint32_t GetCurrentYAxes() const;									// Get the current axes used as Y axes
-	void SetToolVariables(int toolNumber, const float* standbyTemperatures, const float* activeTemperatures);
 	bool IsHeaterAssignedToTool(int8_t heater) const;
 	unsigned int GetNumberOfContiguousTools() const;
 
@@ -76,7 +95,7 @@ public:
 	void FlagTemperatureFault(int8_t dudHeater);
 	void ClearTemperatureFault(int8_t wasDudHeater);
 
-	String<5> panelPin;
+	String<5> panelPin; // LYNXMOD
 
 	Platform& GetPlatform() const;
 	Move& GetMove() const;
@@ -86,12 +105,20 @@ public:
 	Roland& GetRoland() const;
 	Scanner& GetScanner() const;
 	PrintMonitor& GetPrintMonitor() const;
-
+#if SUPPORT_LYNXMOD //LYNXMOD
+	//bool CheckPanelPin(const char* pw) const;
+	//<void SetPanelPin(const char* pw);
+	char GetStatusCharacter() const;
+	LynxMod& GetLynxMod() const;
+	LynxMod *lynxMod;
+#endif
 #if SUPPORT_IOBITS
  	PortControl& GetPortControl() const;
 #endif
 #if SUPPORT_12864_LCD
  	Display& GetDisplay() const;
+ 	const char *GetLatestMessage(uint16_t& sequence) const;
+ 	const MessageBox& GetMessageBox() const { return mbox; }
 #endif
 
 	void Tick();
@@ -103,10 +130,10 @@ public:
 
 	OutputBuffer *GetStatusResponse(uint8_t type, ResponseSource source);
 	OutputBuffer *GetConfigResponse();
-	OutputBuffer *GetIPResponse();
 	OutputBuffer *GetLegacyStatusResponse(uint8_t type, int seq);
-	OutputBuffer *GetFilesResponse(const char* dir, bool flagsDirs);
-	OutputBuffer *GetFilelistResponse(const char* dir);
+	OutputBuffer *GetFilesResponse(const char* dir, unsigned int startAt, bool flagsDirs);
+	OutputBuffer *GetFilelistResponse(const char* dir, unsigned int startAt);
+	bool GetFileInfoResponse(const char *filename, OutputBuffer *&response, bool quitEarly);
 
 	void Beep(unsigned int freq, unsigned int ms);
 	void SetMessage(const char *msg);
@@ -119,11 +146,21 @@ public:
 	void ReportInternalError(const char *file, const char *func, int line) const;	// Report an internal error
 
 	static uint32_t DoDivide(uint32_t a, uint32_t b);		// helper function for diagnostic tests
-	char GetStatusCharacter() const;
+	static float SinfCosf(float angle);						// helper function for diagnostic tests
+	static double SinCos(double angle);						// helper function for diagnostic tests
+
+#ifdef RTOS
+	void KickHeatTaskWatchdog() { heatTaskIdleTicks = 0; }
+#endif
+
+protected:
+	DECLARE_OBJECT_MODEL
 
 private:
 	static void EncodeString(StringRef& response, const char* src, size_t spaceToLeave, bool allowControlChars = false, char prefix = 0);
-
+#if !SUPPORT_LYNXMOD //LYNXMOD
+	char GetStatusCharacter() const;
+#endif
 	static constexpr uint32_t MaxTicksInSpinState = 20000;	// timeout before we reset the processor
 	static constexpr uint32_t HighTicksInSpinState = 16000;	// how long before we warn that timeout is approaching
 
@@ -144,6 +181,7 @@ private:
  	Display *display;
 #endif
 
+ 	Mutex toolListMutex, messageBoxMutex;
 	Tool* toolList;								// the tool list is sorted in order of increasing tool number
 	Tool* currentTool;
 	uint32_t lastWarningMillis;					// When we last sent a warning message for things that can happen very often
@@ -152,9 +190,11 @@ private:
 	uint16_t activeToolHeaters;
 
 	uint16_t ticksInSpinState;
+#ifdef RTOS
+	uint16_t heatTaskIdleTicks;
+#endif
 	Module spinningModule;
 	uint32_t fastLoop, slowLoop;
-	uint32_t lastTime;
 
 	uint32_t debug;
 	bool stopped;
@@ -162,19 +202,18 @@ private:
 	bool resetting;
 	bool processingConfig;
 
-	String<PASSWORD_LENGTH> password;
-	String<MACHINE_NAME_LENGTH> myName;
+	String<RepRapPasswordLength> password;
+	String<MachineNameLength> myName;
 
 	unsigned int beepFrequency, beepDuration;
-	char message[MaxMessageLength + 1];
+	String<MaxMessageLength> message;
+	uint16_t messageSequence;
 
-	// Message box data
-	bool displayMessageBox;
-	String<MaxMessageLength> boxMessage, boxTitle;
-	int boxMode;
-	uint32_t boxSeq;
-	uint32_t boxTimer, boxTimeout;
-	AxesBitmap boxControls;
+	MessageBox mbox;					// message box data
+
+	// Deferred diagnostics
+	MessageType diagnosticsDestination;
+	bool justSentDiagnostics;
 };
 
 inline Platform& RepRap::GetPlatform() const { return *platform; }
@@ -192,6 +231,10 @@ inline PortControl& RepRap::GetPortControl() const { return *portControl; }
 
 #if SUPPORT_12864_LCD
 inline Display& RepRap::GetDisplay() const { return *display; }
+#endif
+
+#if SUPPORT_LYNXMOD
+inline LynxMod& RepRap::GetLynxMod() const { return *lynxMod; }
 #endif
 
 inline bool RepRap::Debug(Module m) const { return debug & (1 << m); }

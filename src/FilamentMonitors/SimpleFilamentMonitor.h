@@ -22,11 +22,14 @@ public:
 	bool Interrupt() override;
 
 private:
-	uint64_t now, prev; // lynxMod
-	double totNoFilament;
 	void Poll();
+// LYNXMOD
+	uint32_t now, prev;
+	unsigned int noFilament;
 
-	bool highWhenNoFilament, filamentPresent, enabled;
+	bool highWhenNoFilament;
+	bool filamentPresent;
+	bool enabled;
 };
 
 #endif /* SRC_FILAMENTSENSORS_SIMPLEFILAMENTMONITOR_H_ */

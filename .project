@@ -4,7 +4,8 @@
 	<comment></comment>
 	<projects>
 		<project>CoreNG</project>
-		<project>RemoteSystemsTempFiles</project>
+		<project>FreeRTOS</project>
+		<project>RRFLibraries</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>
