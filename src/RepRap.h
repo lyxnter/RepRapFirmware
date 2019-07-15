@@ -64,7 +64,7 @@ public:
 
 	bool Debug(Module module) const;
 	void SetDebug(Module m, bool enable);
-	void SetDebug(bool enable);
+	void ClearDebug();
 	void PrintDebug();
 	Module GetSpinningModule() const;
 
@@ -73,8 +73,6 @@ public:
 	bool NoPasswordSet() const;
 	bool CheckPassword(const char* pw) const;
 	void SetPassword(const char* pw);
-	bool CheckPanelPin(const char* pw) const;
-	void SetPanelPin(const char* pw);
 
 	void AddTool(Tool* t);
 	void DeleteTool(Tool* t);
@@ -85,8 +83,8 @@ public:
 	Tool* GetTool(int toolNumber) const;
 	Tool* GetCurrentOrDefaultTool() const;
 	const Tool* GetFirstTool() const { return toolList; }				// Return the lowest-numbered tool
-	uint32_t GetCurrentXAxes() const;									// Get the current axes used as X axes
-	uint32_t GetCurrentYAxes() const;									// Get the current axes used as Y axes
+	AxesBitmap GetCurrentXAxes() const;									// Get the current axes used as X axes
+	AxesBitmap GetCurrentYAxes() const;									// Get the current axes used as Y axes
 	bool IsHeaterAssignedToTool(int8_t heater) const;
 	unsigned int GetNumberOfContiguousTools() const;
 
@@ -94,8 +92,6 @@ public:
 	void PrintTool(int toolNumber, const StringRef& reply) const;
 	void FlagTemperatureFault(int8_t dudHeater);
 	void ClearTemperatureFault(int8_t wasDudHeater);
-
-	String<5> panelPin; // LYNXMOD
 
 	Platform& GetPlatform() const;
 	Move& GetMove() const;
@@ -106,11 +102,11 @@ public:
 	Scanner& GetScanner() const;
 	PrintMonitor& GetPrintMonitor() const;
 #if SUPPORT_LYNXMOD //LYNXMOD
-	//bool CheckPanelPin(const char* pw) const;
-	//<void SetPanelPin(const char* pw);
+	bool CheckPanelPin(const char* pw) const;
+	void SetPanelPin(const char* pw);
 	char GetStatusCharacter() const;
 	LynxMod& GetLynxMod() const;
-	LynxMod *lynxMod;
+	LynxMod* lynxMod;
 #endif
 #if SUPPORT_IOBITS
  	PortControl& GetPortControl() const;
@@ -204,6 +200,8 @@ private:
 
 	String<RepRapPasswordLength> password;
 	String<MachineNameLength> myName;
+
+	String<5> panelPin;
 
 	unsigned int beepFrequency, beepDuration;
 	String<MaxMessageLength> message;

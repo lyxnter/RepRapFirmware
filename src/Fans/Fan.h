@@ -33,6 +33,8 @@ public:
 	void SetPwm(float speed);
 	bool HasMonitoredHeaters() const { return heatersMonitored != 0; }
 	void SetHeatersMonitored(HeatersMonitoredBitmap h);
+	//LYNXMOD
+	inline HeatersMonitoredBitmap GetHeatersMonitored() {return heatersMonitored;};
 	const char *GetName() const { return name.c_str(); }
 
 	bool Check();											// update the fan PWM returning true if it is a thermostatic fan that is on

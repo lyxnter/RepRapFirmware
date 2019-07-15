@@ -30,7 +30,6 @@
 //#include "GCodes/GCodes.h"
 
 #if SUPPORT_LYNXMOD
-
 // LYNXMOD:
 ///////////////////////////////////////////////////////////////////// LYNXMOD /////////////////////////////////////////
 /* Lynxmod revision
@@ -63,47 +62,6 @@ enum DoorState : char {
 
 #define ALIVE 0x38E //0b11 1000 1110 // 910
 
-////////////////////////////////////////////////////// TRAMES //////////////////////////////////////////////////////
-// Couleur ambiance
-// PORTE FERMEE : Le dernier bit est à 1
-// PORTE OUVERTE : Le dernier bit est à 0
-
-#define PRINT_READY          0x00000080 //0b 0000 0000 0000 0000 0000 0000 1000 1111 //  0 ,  0 ,  0 , 143
-#define PRINTING_DC          0x00000080 //0b 0000 0000 0000 0000 0000 0000 1000 1111 //  0 ,  0 ,  0 , 143
-#define PRINTING_DO          0x000000ff //0b 0000 0000 0000 0000 0000 0000 1111 1111 //  0 ,  0 ,  0 , 255
-#define PRINT_PAUSED_DC      0x00000080 //0b 0000 0000 0000 0000 0000 0000 1111 1111 //  0 ,  0 ,  0 , 255
-#define PRINT_PAUSED_DO      0x000000ff //0b 0000 0000 0000 0000 0000 0000 1111 1111 //  0 ,  0 ,  0 , 255
-#define PRINT_FINISHED       0x00000080 //0b 0000 0000 0000 0000 0000 0000 1000 1111 //  0 ,  0 ,  0 , 143
-#define ERREUR_MAJEURE       0xff000000 //0b 1111 1111 0000 0000 0000 0000 0000 0000 // 255,  0 ,  0 ,  0
-#define ERROR_NO_BIG_DEAL    0xff800000 //0b 1111 1111 1000 1111 0000 0000 0000 0000 // 255, 143,  0 ,  0
-#define UPDATE_FIRMWARE      0x00ff8000 //0b 0000 0000 1111 1111 1000 1111 0000 0000 //  0 , 255, 143,  0
-#define PRINT_IDLE_DC        0x00000040 //0b 0000 0000 0000 0000 0000 0000 1000 1111 //  0 ,  0 ,  0 , 143
-#define PRINT_IDLE_DO        0x000000ff //0b 0000 0000 0000 0000 0000 0000 1111 1111 //  0 ,  0 ,  0 , 255
-#define FLASH                0x000000ff //0b 1111 1111 1111 1111 1111 1111 1111 1111 // 255, 255, 255, 255
-#define TEST_LEDS            0xffffffff //0b 1111 1111 1111 1111 1111 1111 1111 1111 // 255, 255, 255, 255
-#define AMBIANCE             0x80808000 //0b 1000 1111 1000 1111 1000 1111 0000 0000 // 143, 143, 143,  0
-#define ERROR_DO			 0x00000080
-#define ERROR_DC			 0x00000000
-
-// Couleurs du verrou warn r g b
-#define APPUI_BP    0b0001
-#define ATTENTE_2BP 0b0010
-#define REPRISE     0b0010
-#define FILTRAGE    0b0110
-#define CANCEL      0b0111
-#define BP_OFF      0b0111
-#define PUSH        0b0010
-#define BLOQUE      0b0110
-
-// transitions in secs
-#define ERROR 0x00
-#define FAST 0x10
-#define MEDIUM 0x20
-#define USER_SLOW 0x40
-#define BREATHING 0x80
-
-//////////////////////////////////////////////////// FIN TRAMES ////////////////////////////////////////////////////
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////// VARIABLES ////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -128,6 +86,10 @@ unsigned int cpt_ip=8000;// 2 secondes avant le premier envoi des données lynxte
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////// STRUCTURES ///////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+struct LightType {
+	char name[9];
+	unsigned long color;
+} listAmbiances[24];
 
 struct LynxMOD {
 	unsigned char Flag_TEMP=0, Flag_Verrou_ON=0, etat=0, door_request=0, door_cpt=0, canceling=0;
@@ -145,7 +107,7 @@ struct LynxMOD {
 
 	Logger logger;
 
-	bool Arbitrage(void) { // En fonction des infos la fonction décide qui est prioritaire
+	bool Arbitrage(LynxMod* Lynxmod) { // En fonction des infos la fonction décide qui est prioritaire
 		char ch = reprap.GetStatusCharacter();
 		// ON REGARDE LE VERROU
 		char lastVer = this->V_VER;
@@ -161,13 +123,6 @@ struct LynxMOD {
 		else if (this->test_leds) {
 			// Demande séquence de test des leds
 			this->V_VER = (TestLeds(false) & 0x0f);//TEST_LEDS;// 172
-		}
-		else if (this->test_states) {
-			// Demande sÃ©quence de test des leds
-			this->V_VER = (TestStates(false) & 0x0f);// 172
-		}
-		else if (this->new_color) {
-			this->V_VER = this->trame_ver;
 		}
 		else if (this->opening_flag == 1) {
 			this->V_VER = Blink(50, 1000); //BLOQUE
@@ -201,6 +156,9 @@ struct LynxMOD {
 				//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "door state LOCKED");
 			}
 		}
+		else if (this->new_color) {
+			this->V_VER = this->trame_ver;
+		}
 		else {
 			// Le bouton ne s'allume pas
 			this->V_VER = BP_OFF;
@@ -213,9 +171,14 @@ struct LynxMOD {
 		//reprap.GetPlatform().MessageF(MessageType::HttpMessage, ";%d: %d;\n",this->new_color, this->trame_col);
 		// ON REGARDE L'AMBIANCE
 		if (this->flash) {
-			// Demande de flash
-			this->V_AMB = FLASH;// 426
-			this->delay = USER_SLOW;
+			if (this->porte_ouverte){
+				// Demande de flash
+				this->V_AMB = listAmbiances[17].color; // FLASH_DO
+			} else {
+				// Demande de flash
+				this->V_AMB = listAmbiances[16].color; //FLASH_DC
+			}
+			this->delay = FAST;
 		}
 		else if (this->test_leds) {
 			// Demande séquence de test des leds
@@ -240,50 +203,78 @@ struct LynxMOD {
 			this->V_AMB = result;
 			this->delay = MEDIUM;
 		}*/
-#if ENABLE_FAULTS
-		else if (/*this->temp_max >= 80 && */0 && !this->heater_fault) {
+		else if (Lynxmod->EnableFaults &&  this->heater_fault) {
 			// Erreur critique (pour l'instant que temperature, à voir si il y a autre chose)
-			this->V_AMB = ERREUR_MAJEURE;// 234/235
-			this->delay = ERROR;
-		}
-		else if (this->heater_fault) {
 			if (Heat::HS_fault != 0) {
 				//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "cc fault\n");
 			}
+			if (this->porte_ouverte)
+				this->V_AMB = listAmbiances[11].color;// MAJOR_ERROR_DO
+			else
+				this->V_AMB = listAmbiances[10].color; // MAJOR_ERROR_DC
+			this->delay = ERROR;
+		}
+		else if (Lynxmod->EnableFaults && !this->heater_fault && false) {
 			// Erreur mineure (ex : fin de fil), pour le moment juste le heater fault
-			this->V_AMB = ERROR_NO_BIG_DEAL; // 610/611
+			if (this->porte_ouverte)
+				this->V_AMB = listAmbiances[13].color; // ERROR_NO_BIG_DEAL_DO
+			else
+				this->V_AMB = listAmbiances[12].color; // ERROR_NO_BIG_DEAL_DC
 			this->delay = FAST;
 		}
-#endif
-		else if (ch == 'H' || ch == 'S') {
-			if (this->porte_ouverte)
-				this->V_AMB = PRINT_PAUSED_DO; // 610/611
-			else
-				this->V_AMB = PRINT_PAUSED_DC; // 610/611
-			this->delay = MEDIUM;
-		}
-		else if (ch == 'B' || ch == 'I') {
-			if (this->porte_ouverte)
-				this->V_AMB = PRINT_IDLE_DO; // 290/291
-			else
-				this->V_AMB = PRINT_IDLE_DC; // 290/291
-			this->delay = MEDIUM;
-		}
-		else if (ch == 'D' || ch == 'R' || ch == 'T' || ch == 'M' || ch == 'P') {
-			// Impression en cours
-			if (this->porte_ouverte)
-				this->V_AMB = PRINTING_DO;// 746/747
-			else
-				this->V_AMB = PRINTING_DC;
-			this->delay = MEDIUM;
-		}
 		else {
-			// IDLE
-			if (this->porte_ouverte)
-				this->V_AMB = PRINT_IDLE_DO; // 290/291
-			else
-				this->V_AMB = PRINT_IDLE_DC; // 290/291
-			this->delay = USER_SLOW;
+			switch (ch) {
+			case 'C': // Reading the configuration file
+			case 'F': // Flashing a new firmware binary
+				if (this->porte_ouverte)
+					this->V_AMB = listAmbiances[15].color; // UPDATE_FIRMWARE_DO
+				else
+					this->V_AMB = listAmbiances[14].color; // UPDATE_FIRMWARE_DC
+				this->delay = FAST;
+				break;
+			case 'D': // Pausing / Decelerating
+			case 'H': // Halted
+			case 'S': // Paused / Stopped
+				if (this->porte_ouverte)
+					this->V_AMB = listAmbiances[7].color; // PRINT_PAUSED_DO
+				else
+					this->V_AMB = listAmbiances[6].color; // PRINT_PAUSED_DC
+				this->delay = MEDIUM;
+				break;
+			case 'B': // Busy
+			case 'M': // Simulating
+			case 'P': // Printing
+			case 'R': // Resuming
+			case 'T': // Changing tool
+				// Impression en cours
+				if (this->porte_ouverte)
+					this->V_AMB = listAmbiances[5].color;// PRINTING_D0
+				else
+					this->V_AMB = listAmbiances[4].color;// PRINTING_DC
+				this->delay = MEDIUM;
+				break;
+			case 'I': // Idle
+				if (this->porte_ouverte)
+					this->V_AMB = listAmbiances[3].color; // PRINT_IDLE_DO
+				else
+					this->V_AMB = listAmbiances[2].color; // PRINT_IDLE_DC
+				this->delay = MEDIUM;
+				break;
+			case 'O': // Off i.e. powered down
+				if (this->porte_ouverte)
+					this->V_AMB = 0xFFFFFFFF;
+				else
+					this->V_AMB = 0;// OFF_DC
+				this->delay = MEDIUM;
+				break;
+			default:
+				if (this->porte_ouverte)
+					this->V_AMB = listAmbiances[1].color; // PRINT_READY_DO
+				else
+					this->V_AMB = listAmbiances[0].color; // PRINT_READY_DC
+				this->delay = USER_SLOW;
+				break;
+			}
 		}
 		return (this->V_VER != lastVer || this->V_AMB != lastAmb);
 	}
@@ -389,103 +380,6 @@ struct LynxMOD {
 				return Heartbeat(2000, true);
 		}
 	}
-
-	unsigned long TestStates(bool testAmb)
-	{
-		unsigned long compteur;
-		if (testAmb)
-		{
-			compteur = millis() % 30000;
-			if (compteur < 0000) {
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Print ready\n");
-				return PRINT_READY;
-			} else if (compteur < 5000) {
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Printing DC\n");
-				return PRINTING_DC;
-			} else if (compteur < 10000) {
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Printing DO\n");
-				return PRINTING_DO;
-			} else if (compteur < 15000) {
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Print paused DC\n");
-				return PRINT_PAUSED_DC;
-			} else if(compteur < 20000){
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Print paused DO\n");
-				return PRINT_PAUSED_DO;
-			} else if(compteur < 25000){
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Print idle DC\n");
-				return PRINT_IDLE_DC;
-			} else if(compteur < 30000){
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Print idle DO\n");
-				return PRINT_IDLE_DO;
-			} else if (compteur < 16000) {
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Print finished\n");
-				return PRINT_FINISHED;
-			} else if (compteur < 18000) {
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Minor ERROR\n");
-				return ERROR_NO_BIG_DEAL;
-			} else if (compteur < 20000) {
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Fatal ERROR\n");
-				return ERREUR_MAJEURE;
-			} else if (compteur < 22000) {
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Firmware update\n");
-				return UPDATE_FIRMWARE;
-			} else if (compteur < 24000) {
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Flash\n");
-				return FLASH;
-			} else if (compteur < 26000) {
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Test LEDs\n");
-				return TEST_LEDS;
-			} else if (compteur < 28000) {
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Ambiance\n");
-				return AMBIANCE;
-			}
-		} else {
-			/*compteur = millis() % 30000;
-					if (compteur < 6000) {
-						reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Delay ERROR\n");
-			 */this->delay = ERROR;/*
-					} else if (compteur < 12000) {
-						reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Delay FAST\n");
-						this->delay = FAST;
-
-					} else if (compteur < 18000) {
-						reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Delay MEDIUM\n");
-						this->delay = MEDIUM;
-
-					} else if (compteur < 24000) {
-						reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Delay USER_SLOW\n");
-						this->delay = USER_SLOW;
-
-					} else if (compteur < 30000) {
-						reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Delay BREATHING\n");
-						this->delay = BREATHING;
-					}*/
-			 compteur = millis() % 30000;
-			 if (compteur < 5000){
-				 reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Canceling\n");
-				 return Heartbeat(2000, true);
-			 } else if (compteur < 10000){
-				 reprap.GetPlatform().MessageF(MessageType::DebugMessage, "attente second appuis\n");
-				 return ATTENTE_2BP;
-			 } else if (compteur < 12500) {
-				 reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Ouverture bloquée\n");
-				 return  Blink(50, 1000);
-			 } else if (compteur < 15000){
-				 reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Ouverture bloquée\n");
-				 return this->V_VER = Blink(50, 2000); //BLOQUE;
-			 } else if (compteur < 20000){
-				 reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Porte deverouillée\n");
-				 return PUSH;
-			 } else if (compteur < 25000){
-				 reprap.GetPlatform().MessageF(MessageType::DebugMessage, "Filtrage/ Refroidissement\n");
-				 return Blink(50, 1000);
-			 } else if (compteur < 30000){
-				 reprap.GetPlatform().MessageF(MessageType::DebugMessage, "BP off\n");
-				 return BP_OFF;
-			 }
-		}
-		return compteur;
-	}
 };
 
 LynxMOD Modlynx;
@@ -529,9 +423,6 @@ struct Emission {
 			if (this->data_amb != 0 && this->data_ver != 0) { // On envoi l'info 5 fois
 				this->fait = 1;
 				this->id = 0;
-			} else if (this->data_amb == 0) {
-				reprap.GetPlatform().MessageF(MessageType::HttpMessage,"Invalid machine state %lu %d",this->data_amb, this-> data_ver);
-				return;
 			}
 			//unsigned long output = data;
 			//Serial.println(output, HEX);
@@ -551,13 +442,7 @@ struct Emission {
 			data[5] = csum & 0xff;
 			data[6] = (csum >> 8) & 0xff;
 			data[7] = '\n';
-			/*if(Modlynx.test_leds)
-			{
-				for (int i = 0; i < 7; i++){
-					reprap.GetPlatform().MessageF(MessageType::DebugMessage,"%d ",(data[i] & 0xFF));
-				}
-				reprap.GetPlatform().MessageF(MessageType::DebugMessage,"\n");
-			}*/
+
 			spi_status_t sts;
 			{
 				MutexLocker lock(Tasks::GetSpiMutex(), 50);
@@ -596,74 +481,9 @@ struct Emission {
 				}
 				memoire++;
 				//return TemperatureError::timeout;
-			} else {
-				memoire = 0;
 			}
 
 			this->derniere_trame = millis();
-			//return TemperatureError::success;
-			/*
-			// send test Bytes
-			for (unsigned int i = 0; i < 5; i++)
-			{
-				//reprap.GetPlatform().MessageF(MessageType::HttpMessage,"%d ",(output & 0xFF));
-				SPI->transfer((Byte)(data[i] & 0xFF));
-			    //output = (output >> 8);
-			}
-			SPI->transfer(f0);
-			SPI->transfer(f1);
-			//SPI.transfer(c0);
-			//SPI.transfer(c1);
-			SPI->transfer('\n');
-
-			// disable Slave Select
-			digitalWrite(24, HIGH); // SS is CS5 // 56-24
-
-			unsigned int endCode = I2C_IFACE.endTransmission();
-			if (endCode == 0)
-			{
-				memoire = 0;
-			} else {
-				if (memoire <= 5)
-				{
-					switch (endCode)
-					{
-					case 1:
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "I2C transmission error :\nBuffer overflow\n trying %d more times\n", (5-memoire));
-						break;
-					case 2:
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "I2C transmission error :\nNo device at this address (%d)\n trying %d more times\n", this->I2CAddr, (5-memoire));
-						break;
-					case 3:
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "I2C transmission error :\nData not received\n trying %d more times\n", (5-memoire));
-						break;
-					case 4:
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "I2C transmission error :\nUnknown error\n trying %d more times\n", (5-memoire));
-						break;
-					}
-					memoire++;
-				}
-				else
-				{
-					switch (endCode)
-					{
-					case 1:
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "I2C transmission error :\nBuffer overflow\n trying in 30s\n");
-						break;
-					case 2:
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "I2C transmission error :\nNo device at this address (%d)\n trying in 30s\n", this->I2CAddr);
-						break;
-					case 3:
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "I2C transmission error :\nData not received\n trying in 30s\n");
-						break;
-					case 4:
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "I2C transmission error :\nUnknown error\n trying in 30s\n");
-						break;
-					}
-					nb_err = millis();
-				}
-
-			}*/
 		}
 	}
 
@@ -700,8 +520,8 @@ Emission Transmission;
 unsigned int micros() {return millis()*1000;} //(clock()*1000000)/CLOCKS_PER_SEC;};
 
 LynxMod::LynxMod():
-		filtrationFan(2),
-		doorFan(5)
+																										filtrationFan(2),
+																										doorFan(5)
 {
 
 	// Put SCK, MOSI, SS pins into output mode
@@ -720,7 +540,28 @@ void LynxMod::Init()
 	realTime = reprap.GetPlatform().GetRealTime();
 
 	SetBit(door_fan_heaters, (unsigned int) 4);
-		reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Door fan: heaters set to %lu\n", door_fan_heaters);
+	//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "Door fan: heaters set to %lu \n", door_fan_heaters);
+
+	listAmbiances[ 0] = (LightType){ "Ready\0", PRINT_READY};
+	listAmbiances[ 1] = (LightType){ "Ready\0", PRINT_READY};
+	listAmbiances[ 2] = (LightType){ "Idle\0", PRINT_IDLE_DC};
+	listAmbiances[ 3] = (LightType){ "Idle\0", PRINT_IDLE_DO};
+	listAmbiances[ 4] = (LightType){ "Print\0", PRINTING_DC};
+	listAmbiances[ 5] = (LightType){ "Print\0", PRINTING_DO};
+	listAmbiances[ 6] = (LightType){ "Paused\0", PRINT_PAUSED_DC};
+	listAmbiances[ 7] = (LightType){ "Paused\0", PRINT_PAUSED_DO};
+	listAmbiances[ 8] = (LightType){ "Done\0", PRINT_FINISHED}; // not implemented
+	listAmbiances[ 9] = (LightType){ "Done\0", PRINT_FINISHED}; // not implemented
+
+	listAmbiances[10] = (LightType){ "Error\0", ERREUR_MAJEURE_DC};
+	listAmbiances[11] = (LightType){ "Error\0", ERREUR_MAJEURE_DO};
+	listAmbiances[12] = (LightType){ "Warning\0", ERROR_NO_BIG_DEAL_DC};
+	listAmbiances[13] = (LightType){ "Warning\0", ERROR_NO_BIG_DEAL_DO};
+	listAmbiances[14] = (LightType){ "Update\0", UPDATE_FIRMWARE};
+	listAmbiances[15] = (LightType){ "Update\0", UPDATE_FIRMWARE};
+	listAmbiances[16] = (LightType){ "Flash\0", FLASH};
+	listAmbiances[17] = (LightType){ "Flash\0", FLASH};
+
 }
 
 void LynxMod::Spin() {
@@ -739,30 +580,36 @@ void LynxMod::Spin() {
 		}
 
 		// Status de la machine
-		char ch = reprap.GetStatusCharacter();
-		if (ch == 'R' || ch == 'M' || ch == 'P' || ch == 'D' || ch == 'T') {
-			Modlynx.IDLING = false;
-		}
-		else {
+		if (EnableSafeties){
+			char ch = reprap.GetStatusCharacter();
+			if (ch == 'R' || ch == 'M' || ch == 'P' || ch == 'D' || ch == 'T') {
+				Modlynx.IDLING = false;
+			}
+			else {
+				Modlynx.IDLING = true;
+			}
+		} else if (!Modlynx.IDLING) {
 			Modlynx.IDLING = true;
 		}
-
 		//LynxInit(lynxModTX, inputDoorState, inputDoorBP);
 		Modlynx.porte_ouverte = digitalRead(INPUT_DOOR_STATE);// Porte
 		/*if (Modlynx.porte_ouverte){
-			reprap.GetPlatform().MessageF(MessageType::DebugMessage, "DOOR is open\n");
+			reprap.GetPlatform().MessageF(MessageType::UsbMessage, "DOOR is open\n");
 		} else {
-			reprap.GetPlatform().MessageF(MessageType::DebugMessage, "DOOR is closed\n");
+			reprap.GetPlatform().MessageF(MessageType::UsbMessage, "DOOR is closed\n");
 		}*/
-		if (!Modlynx.porte_ouverte && (filtration_fan_pwm >= 0)){
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Door closed: filtration fan set to %f%%\n", (filtration_fan_pwm*100.0));
-			//MessageF(MessageType::HttpMessage, "Door closed: Door fan set to %f\%\n", door_fan_pwm*100.0);
-			reprap.GetPlatform().SetFanValue(filtrationFan, filtration_fan_pwm);
-			reprap.GetPlatform().fans[doorFan].SetHeatersMonitored(door_fan_heaters);
-			filtration_fan_pwm = -1.0;
-		}
-		
-		//LynxM968();
+		if (Modlynx.porte_ouverte && !didOpen) {
+			didOpen = true;
+		} else
+			if (!Modlynx.porte_ouverte && (filtration_fan_pwm >= 0) && didOpen){
+				reprap.GetPlatform().MessageF(MessageType::UsbMessage, "Door closed: Filtration fan set to %.2f%%\n", (double)(filtration_fan_pwm*100.0));
+				//MessageF(MessageType::HttpMessage, "Door closed: Door fan set to %.2f%%\n", door_fan_pwm*100.0);
+				reprap.GetPlatform().SetFanValue(filtrationFan, filtration_fan_pwm);
+				reprap.GetPlatform().fans[doorFan].SetHeatersMonitored(door_fan_heaters);
+				filtration_fan_pwm = -1.0;
+			}
+
+		LynxM968();
 		LynxM969(); // Analyse des M969 reçu
 		ComC = 0;
 
@@ -779,7 +626,7 @@ void LynxMod::Spin() {
 		prev=now;
 
 		// Que transmettre ?
-		if(Modlynx.Arbitrage() || (millis()-Transmission.derniere_trame) > 5000) // On détermine les valeurs à transmettre
+		if(Modlynx.Arbitrage(this) || (millis()-Transmission.derniere_trame) > 5000) // On détermine les valeurs à transmettre
 			LynxModCom(Modlynx.V_AMB, Modlynx.V_VER, Modlynx.delay); // Le bus envoie des données si elles sont différentes des données précédentes, donc on alterne entre une emission d'ambiance et verrou
 	}
 
@@ -900,48 +747,52 @@ void LynxMod::LynxModCom(unsigned long valeur_amb, char valeur_ver, char delay) 
 void LynxMod::SetSafeHeatedChamberFan()	// Control heated chamber fan PWM to avoid fan and structure overheating
 {
 	//lynxmod
-	size_t chamberfan = 1;
+	size_t chamberFan = 1;
+	if (reprap.GetPlatform().fans[chamberFan].GetHeatersMonitored() != 0) {
+		//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%lu\r\n", reprap.GetPlatform().fans[chamberFan].GetHeatersMonitored());
+		reprap.GetPlatform().fans[chamberFan].SetHeatersMonitored(0);
+	}
 	for (size_t i = 0; i < NumChamberHeaters; i++) {
 		const int8_t chamberHeater = reprap.GetHeat().GetChamberHeater(i);
 		if (chamberHeater >= 0) {
 			float chamberPWM = reprap.GetHeat().GetAveragePWM(chamberHeater);
 			float chamberTemp = reprap.GetHeat().GetTemperature(chamberHeater);
 			float heatingPWM = (chamberPWM/4.0)+0.25;
-			float coolingPWM = (chamberTemp < 165.0 ? (1.5*chamberTemp)/255.0 : 0.75);
+			float coolingPWM = (chamberTemp < 165.0 ? (1.5*chamberTemp)/255.0 : 1.0);
 			if(heatingPWM > coolingPWM && chamberPWM > 0.01) {
-				reprap.GetPlatform().SetFanValue(chamberfan, heatingPWM);
+				reprap.GetPlatform().SetFanValue(chamberFan, heatingPWM);
 			} else {
-				reprap.GetPlatform().SetFanValue(chamberfan, coolingPWM);
+				reprap.GetPlatform().SetFanValue(chamberFan, coolingPWM);
 			}
 		}
 	}
 }
 
-float filtration_fan_pwm = -1.0;
 void LynxMod::Lock(bool cmd) {
 	if (!Modlynx.porte_ouverte) { // porte fermée
 		cmd = false;
 	}
 	if (filtration_fan_pwm < 0 && !cmd){
-			filtration_fan_pwm = reprap.GetPlatform().GetFanValue(filtrationFan);
-			//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Door unlocked:\n filtration fan was at %f%%, Door fan was at %f%%\n", filtration_fan_pwm*100.0, reprap.GetPlatform().GetFanValue(doorFan)*100.0);
-			reprap.GetPlatform().fans[doorFan].SetHeatersMonitored(0);
-			reprap.GetPlatform().SetFanValue(filtrationFan, 0.0);
-			reprap.GetPlatform().SetFanValue(doorFan, 0.0);
-		}
-	IoPort::WriteAnalog(DOOR_CMD, (cmd ? 255 : 0), 0);
-	/*if (cmd){
-		MessageF(MessageType::DebugMessage, "Lock is open\n");
+		filtration_fan_pwm = reprap.GetPlatform().GetFanValue(filtrationFan);
+		reprap.GetPlatform().MessageF(MessageType::UsbMessage, "Door unlocked: filtration fan was at %.2f%%, Door fan was at %.2f%%\n", (double)(filtration_fan_pwm*100.0), (double)(reprap.GetPlatform().GetFanValue(doorFan)*100.0));
+		reprap.GetPlatform().fans[doorFan].SetHeatersMonitored(0);
+		reprap.GetPlatform().SetFanValue(filtrationFan, 0.0);
+		reprap.GetPlatform().SetFanValue(doorFan, 0.0);
+		didOpen = false;
+	}
+	/*if (!IoPort::ReadPin(DOOR_CMD)){
+		reprap.GetPlatform().MessageF(MessageType::UsbMessage, "Lock is open\n");
 	} else {
-		MessageF(MessageType::DebugMessage, "Lock is closed\n");
+		reprap.GetPlatform().MessageF(MessageType::UsbMessage, "Lock is closed\n");
 	}*/
+	IoPort::WriteAnalog(DOOR_CMD, (cmd ? 255 : 0), 0);
 }
 
 /* Gère l'ouverture de la porte */
 void LynxMod::Verrouillage() {
 	Modlynx.door_bp_pressed = !digitalRead(INPUT_DOOR_BP); // BP_DOOR
 	/*if (Modlynx.door_bp_pressed){
-		reprap.GetPlatform().MessageF(MessageType::DebugMessage, "BP_DOOR is pressed\n");
+		reprap.GetPlatform().MessageF(MessageType::UsbMessage, "BP_DOOR is pressed\n");
 	}*/
 	char ch = reprap.GetStatusCharacter();// Status de la machine
 
@@ -1029,8 +880,7 @@ void LynxMod::Verrouillage() {
 			// Si la porte est fermée, on ouvre
 			Lock(false);
 			Modlynx.pushpls = true;
-		}
-		else { // une fois ouverte
+		} else { // une fois ouverte
 			Lock(true);
 			Modlynx.pushpls = false;
 			reprise_cpt=0;
@@ -1261,9 +1111,8 @@ void LynxMod::LynxDataLogs() {
 		}
 
 		// Position demandée par l'utilisateur
-		const float * const userPos = reprap.GetGCodes().GetUserPosition();
 		for (size_t axis = 0; axis < 3; axis++) {
-			const float coord = userPos[axis];
+			const float coord = reprap.GetGCodes().GetUserCoordinate(axis);;
 			SafeSnprintf(fl, FL_SIZE, "%.2f", (double)((std::isnan(coord) || std::isinf(coord)) ? 9999.9 : coord));
 			strcat(log, fl);
 			strcat(log, ";");
@@ -1301,91 +1150,166 @@ int LynxMod::GetLEDs() {
 
 void LynxMod::LynxM968(){
 	bool err = false;
-	if (Com != ex_Com && ComC == 968)
+	if (ComC == 968)
 	{
+		//reprap.GetPlatform().MessageF(MessageType::HttpMessage, " M968 Trait&eacute;\n");
 		switch (Com){
-
+		case 0:
+			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S1: Ask for door to be open\n");
+			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S2: &empty; Report door safety sate\n\tP[1/0] ;Enable/Disable door safeties\n");
+			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S3: &empty; Reports error reporting state\n\tP[1/0] ;Enable/Disable LED display Error states\n");
+			break;
 		case 1:
 			// On demande d'ouvrir la porte
 			logger->LogMessage(reprap.GetPlatform().GetRealTime(), ";Panel Due door opening request;\n");
 			if (!Modlynx.porte_ouverte) {
-				// Si la porte est fermée
-				char ch = reprap.GetStatusCharacter();
-				if (ch != 'R' && ch != 'M' && ch != 'P') {
-					// Si la machine est en pause, on ouvre
+				if (EnableSafeties){
+					// Si la porte est fermée
+					char ch = reprap.GetStatusCharacter();
+					if (ch != 'R' && ch != 'M' && ch != 'P') {
+						// Si la machine est en pause, on ouvre
+						Modlynx.panel_open = true;
+					}
+					else {
+						// Sinon on exécute les sécurités
+						Modlynx.DOOR_FLAG = BP_OPEN_DOOR;
+					}
+				} else {
 					Modlynx.panel_open = true;
-				}
-				else {
-					// Sinon on exécute les sécurités
-					Modlynx.DOOR_FLAG = BP_OPEN_DOOR;
 				}
 			}
 			break;
+		case 2:
+			if (ComP < 0) {
+				reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Safeties are %s\n", (EnableSafeties?"enabled":"disabled"));
+			} else {
+				this->EnableSafeties = !!ComP;
+				reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Safeties are now %s\n", (EnableSafeties?"<span style='background:green;border-radius:4px;padding:1px 3px;'>ENABLED</span>":"<span style='background:red;border-radius:4px;padding:1px 3px;'>DISABLED</span>"));
+			}
+			break;
+		case 3:
+			if (ComP < 0) {
+				reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Faults are %s\n", (this->EnableFaults?"enabled":"disabled"));
+			} else {
+				this->EnableFaults = !!ComP;
+				reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Faults are now %s\n", (EnableFaults?"enabled":"disabled"));
+			}
+			break;
 		default :
-			err = true;
+			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S1: Ask for door to be open\n");
+			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S2: &empty; Report door safety sate\n\tP[1/0] ;Enable/Disable door safeties\n");
+			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S3: &empty; Reports error reporting state\n\tP[1/0] ;Enable/Disable LED display Error states\n");
+			break;
 		}
 		this->ex_Com = this->Com;
-		this->ComP = 0;
-		this->Com = 0;
+		this->ComC = -1;
+		this->ComP = -1;
+		this->Com = -1;
 	}
 	if (err) {
-		reprap.GetPlatform().MessageF(MessageType::HttpMessage, "P value incorrect\n");
+		reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S value incorrect\n");
 	}
 }
 
 void LynxMod::LynxM969() {
 	bool err = false;
-	//reprap.GetPlatform().MessageF(MessageType::DebugMessage, " M969 Spinning %d ?= %d, ComC = %d \n", this->Com, this->ex_Com, this->ComC);
+	unsigned long color = 0;
+	/*if (ComC > 0){
+		reprap.GetPlatform().MessageF(MessageType::UsbMessage, "M969 Spinning %d, ComC = %d, ComP = %d \r\n", Com, ComC, ComP);
+	}*/
 	// Fonction qui va agir selon les données reçues par le GCode M969 SX
-	if (Com != ex_Com && ComC == 969) {
+	if (/*Com != ex_Com &&*/ ComC == 969) {
 		//reprap.GetPlatform().MessageF(MessageType::HttpMessage, " M969 Traite\n");
 		switch (Com) {
 		case 0:
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S1: allumage du flash ('luminosité max')\n S4 Test leds \nS5 P[0000-1111]: Allumage manuel LED Old\n\t R[0-255] V[0-255] B[0-255] W[0-255] L[000-111] Allumage manuel LED New");
+			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S1: Toggle flash ON/OFF ('luminosit&eacute; max')\n");
+			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S2:\nList state color\n\t &empty; List all available states and their colors\n\tP[0-17] Display configured colors for the state\nSet state colors\n\t P[0-17] [R[0-255]] [V[0-255]] [B[0-255]] [W[0-255]]\n");
+			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S4 Test leds \nS5: Manually set color\n\t&empty; Reset color \n\tR[0-255] V[0-255] B[0-255] W[0-255] L[000-111]  Set LED Color\n\tP[0000-1111]: Set LED Color (Deprecated)\n");
 			break;
 		case 1:
 			// On demande d'allumer le flash
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S1: allumage du flash ('White max')\n");
-			reprap.GetPlatform().GetLogger()->LogMessage(reprap.GetPlatform().GetRealTime(), ";Flash;\n");
-			Modlynx.flash = true;
-			Modlynx.flash_cpt = 0;
+			//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "S1: %s du flash ('White max')\n", (Modlynx.flash?"extinction":"allumage"));
+			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S1: %s du flash ('White max')\n", (Modlynx.flash?"extinction":"allumage"));
+			//reprap.GetPlatform().GetLogger()->LogMessage(reprap.GetPlatform().GetRealTime(), ";Flash %s;\n", (Modlynx.flash?"OFF":"ON"));
+			Modlynx.flash = !Modlynx.flash;
 			break;
 
 		case 2:
-			// On demande d'ouvrir la porte
-			logger->LogMessage(reprap.GetPlatform().GetRealTime(), ";Panel Due door opening request;\n");
-			if (!Modlynx.porte_ouverte) {
-				// Si la porte est fermée
-				char ch = reprap.GetStatusCharacter();
-				if (ch != 'R' && ch != 'M' && ch != 'P') {
-					// Si la machine est en pause, on ouvre
-					Modlynx.panel_open = true;
+			if (ComCol[0] < 0 && ComCol[1] < 0 && ComCol[2] < 0 && ComCol[3] < 0) {
+				if (ComP >= 0) {
+					//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%d >= 0\n", ComP);
+					int i = (ComP/2)*2;
+					reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%8s_DC(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i, (listAmbiances[i].color >> 24), ((listAmbiances[i].color >> 16) & 0xFF), ((listAmbiances[i].color >> 8) & 0xFF), (listAmbiances[i].color & 0xFF));
+					reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%8s_DO(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i+1, (listAmbiances[i+1].color >> 24), ((listAmbiances[i+1].color >> 16) & 0xFF), ((listAmbiances[i+1].color >> 8) & 0xFF), (listAmbiances[i+1].color & 0xFF));
+					//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%8s_DC(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i, (listAmbiances[i].color >> 24), ((listAmbiances[i].color >> 16) & 0xFF), ((listAmbiances[i].color >> 8) & 0xFF), (listAmbiances[i].color & 0xFF));
+					//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%8s_DO(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i+1, (listAmbiances[i+1].color >> 24), ((listAmbiances[i+1].color >> 16) & 0xFF), ((listAmbiances[i+1].color >> 8) & 0xFF), (listAmbiances[i+1].color & 0xFF));
+				} else {
+					for (int i = 0; i < 18; i+=2){
+						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%8s_DC(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i, (listAmbiances[i].color >> 24), ((listAmbiances[i].color >> 16) & 0xFF), ((listAmbiances[i].color >> 8) & 0xFF), (listAmbiances[i].color & 0xFF));
+						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%8s_DO(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i+1, (listAmbiances[i+1].color >> 24), ((listAmbiances[i+1].color >> 16) & 0xFF), ((listAmbiances[i+1].color >> 8) & 0xFF), (listAmbiances[i+1].color & 0xFF));
+						//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%8s_DC(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i, (listAmbiances[i].color >> 24), ((listAmbiances[i].color >> 16) & 0xFF), ((listAmbiances[i].color >> 8) & 0xFF), (listAmbiances[i].color & 0xFF));
+						//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%8s_DO(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i+1, (listAmbiances[i+1].color >> 24), ((listAmbiances[i+1].color >> 16) & 0xFF), ((listAmbiances[i+1].color >> 8) & 0xFF), (listAmbiances[i+1].color & 0xFF));
+					}
 				}
+			} else {
+				if(ComP < 0) { err = true;}
 				else {
-					// Sinon on exécute les sécurités
-					Modlynx.DOOR_FLAG = BP_OPEN_DOOR;
+					color = listAmbiances[ComP].color;
+					if (ComCol[0] >= 0 && ComCol[0] < 256)
+					{
+						color = (color & 0x00FFFFFF ) | (ComCol[0] << 24);
+						ComCol[0] = 0;
+					}
+					else if (ComCol[0] >= 256) { err = true; }
+					if (ComCol[1] >= 0 && ComCol[1] < 256)
+					{
+						color = (color & 0xFF00FFFF ) | (ComCol[1] << 16);
+						ComCol[1] = 0;
+					} else if (ComCol[1] >= 256) { err = true; }
+					if (ComCol[2] >= 0 && ComCol[2] < 256)
+					{
+						color = (color & 0xFFFF00FF ) | (ComCol[2] << 8);
+						ComCol[2] = 0;
+					}
+					else if (ComCol[2] >= 256) { err = true; }
+					if (ComCol[3] >= 0 && ComCol[3] < 256)
+					{
+						color = (color & 0xFFFFFF00 ) | ComCol[3];
+						ComCol[3] = 0;
+					}
+					else if (ComCol[3] >= 256) { err = true; }
+				}
+				if (!err) {
+					listAmbiances[ComP].color = color;
+					if (ComP == (ComP/2)*2)
+						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%s_DC color updated\n", listAmbiances[(ComP/2)*2].name);
+					else
+						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%s_DO color updated\n", listAmbiances[(ComP/2)*2].name);
+					//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%8s_DO: R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[(ComP/2)*2].name, (listAmbiances[((ComP/2)*2)+1].color >> 24), ((listAmbiances[((ComP/2)*2)+1].color >> 16) & 0xFF), ((listAmbiances[((ComP/2)*2)+1].color >> 8) & 0xFF), (listAmbiances[((ComP/2)*2)+1].color & 0xFF));
+					//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%8s_DC: R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[(ComP/2)*2].name, (listAmbiances[(ComP/2)*2].color >> 24), ((listAmbiances[(ComP/2)*2].color >> 16) & 0xFF), ((listAmbiances[(ComP/2)*2].color >> 8) & 0xFF), (listAmbiances[(ComP/2)*2].color & 0xFF));
+					//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%8s_DO: R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[(ComP/2)*2].name, (listAmbiances[((ComP/2)*2)+1].color >> 24), ((listAmbiances[((ComP/2)*2)+1].color >> 16) & 0xFF), ((listAmbiances[((ComP/2)*2)+1].color >> 8) & 0xFF), (listAmbiances[((ComP/2)*2)+1].color & 0xFF));
+
+				} else {
+					reprap.GetPlatform().MessageF(MessageType::HttpMessage, "incorrect Parameters \n\tS3 P[0-19] R[0-255] V[0-255] B[0-255] W[0-255]\n");
 				}
 			}
 			break;
 
 		case 3:
-			// SÃ©quence de test des etats
-			logger->LogMessage(realTime, ";STATES sequence test;\n");
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, ";STATES sequence test;\n");
-			Modlynx.test_states = true;
-			Modlynx.tests_cpt = 0;
+
 			break;
 
 		case 4:
 			// Séquence de test des leds
 			logger->LogMessage(reprap.GetPlatform().GetRealTime(), ";LEDs sequence test;\n");
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, ";LEDs sequence test;\n");
+			reprap.GetPlatform().MessageF(MessageType::UsbMessage, ";LEDs sequence test;\n");
 			Modlynx.test_leds = true;
 			Modlynx.test_cpt = 0;
 			break;
 
 		case 5:
 			logger->LogMessage(reprap.GetPlatform().GetRealTime(), ";LEDs update;\n");
+			reprap.GetPlatform().MessageF(MessageType::HttpMessage, ";LEDs update;\n");
 			// Changer la couleur de la machine
 			if (ComP >= 0 && ComP <= 1111) {
 				Modlynx.trame_col=0;
@@ -1411,35 +1335,34 @@ void LynxMod::LynxM969() {
 					}
 				}
 				if (ComP >= 1) {
-					Modlynx.trame_col+=0x000000ff;
+					Modlynx.trame_col+=0x000000FF;
 					ComP-=1;
 					if (ComP >= 1) {
 						err = true;
 					}
 				}
-			} else {
-				if (ComCol[0] < 256)
+			} else if (ComP < -1) {
+				if (ComCol[0] >= 0 && ComCol[0] < 256)
 				{
 					Modlynx.trame_col = ComCol[0];
 					ComCol[0] = 0;
 				}
 				else if (ComCol[0] >= 256) { err = true; }
 				Modlynx.trame_col = (Modlynx.trame_col << 8);
-				if (ComCol[1] < 256)
+				if (ComCol[1] >= 0 && ComCol[1] < 256)
 				{
 					Modlynx.trame_col += ComCol[1];
 					ComCol[1] = 0;
-				}
-				else if (ComCol[1] >= 256) { err = true; }
+				} else if (ComCol[1] >= 256) { err = true; }
 				Modlynx.trame_col = (Modlynx.trame_col << 8);
-				if (ComCol[2] < 256)
+				if (ComCol[2] >= 0 && ComCol[2] < 256)
 				{
 					Modlynx.trame_col += ComCol[2];
 					ComCol[2] = 0;
 				}
 				else if (ComCol[2] >= 256) { err = true; }
 				Modlynx.trame_col = (Modlynx.trame_col << 8);
-				if (ComCol[3] < 256)
+				if (ComCol[3] >= 0 && ComCol[3] < 256)
 				{
 					Modlynx.trame_col += ComCol[3];
 					ComCol[3] = 0;
@@ -1476,8 +1399,9 @@ void LynxMod::LynxM969() {
 
 			if (err) {
 				reprap.GetPlatform().MessageF(MessageType::HttpMessage, "incorrect Parameters \n\tS5 P[0000-1111] / R[0-255] V[0-255] B[0-255] W[0-255] L[000-111]");
-			}
-			else {
+			} else if (ComP == -1) {
+				Modlynx.new_color = false;
+			} else {
 				//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Colour changed %lu\n", Modlynx.trame_col);
 				Modlynx.new_color = true;
 				Modlynx.newc_cpt = 0;
@@ -1486,29 +1410,32 @@ void LynxMod::LynxM969() {
 
 		case 6:
 			// On change l'état des leds
-			(Modlynx.amb ) ? Modlynx.amb = false : Modlynx.amb = true;
+			Modlynx.trame_col = 0;
+			Modlynx.trame_ver = 0;
+			Modlynx.new_color = !Modlynx.new_color;
+			//(Modlynx.amb ) ? Modlynx.amb = false : Modlynx.amb = true;
 			break;
 
 		default:
 			break;
 		}
-		this->ex_Com = this->Com;
-		this->ComP = 0;
-		this->Com = -1;
+		ex_Com = Com;
+		ComP = -1;
+		Com = -1;
 	}
 	// On gère le flash
-	if (Modlynx.flash) {
+	/*if (Modlynx.flash) {
 		Modlynx.flash_cpt++;
 		if (Modlynx.flash_cpt >= DUREE_FLASH/Modlynx.synchro) {
 			Modlynx.flash = false;
-			this->ex_Com = 0;
+			ex_Com = 0;
 		}
-	}
+	}*/
 	if (Modlynx.test_leds) {
 		Modlynx.test_cpt++;
 		if (Modlynx.test_cpt >= DUREE_TEST/Modlynx.synchro) {
 			Modlynx.test_leds = false;
-			this->ex_Com = 0;
+			ex_Com = 0;
 		}
 	}
 
@@ -1516,17 +1443,17 @@ void LynxMod::LynxM969() {
 		Modlynx.tests_cpt++;
 		if (Modlynx.tests_cpt >= DUREE_TEST/Modlynx.synchro) {
 			Modlynx.test_states = false;
-			this->ex_Com = 0;
+			ex_Com = 0;
 		}
 	}
 
-	if (Modlynx.new_color) {
+	/*if (Modlynx.new_color) {
 		Modlynx.newc_cpt++;
 		if (Modlynx.newc_cpt >= DUREE_ENVOI/Modlynx.synchro) {
 			Modlynx.new_color = false;
-			this->ex_Com = 0;
+			ex_Com = 0;
 		}
-	}
+	}*/
 }
 
 void LynxMod::LynxCheck(GCodeBuffer& gb) {
@@ -1558,10 +1485,26 @@ void LynxMod::LynxCheck(GCodeBuffer& gb) {
 void LynxMod::Diagnostics(MessageType mtype)
 {
 	reprap.GetPlatform().Message(mtype, "=== Lynx Mod ===\n");
-	reprap.GetPlatform().MessageF(mtype, "Status: running\n");
+	reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Safeties are %s\n", (this->EnableSafeties?"enabled":"disabled"));
+	reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Faults are %s\n", (this->EnableFaults?"enabled":"disabled"));
 	reprap.GetPlatform().MessageF(mtype, "Door is : %s \n",(Modlynx.porte_ouverte?"Open": "Closed"));
-	reprap.GetPlatform().MessageF(mtype, "Ambiance color is : %lu \n",Modlynx.V_AMB);
-	reprap.GetPlatform().MessageF(mtype, "Button color is : %d \n",Modlynx.V_VER);
+	reprap.GetPlatform().MessageF(mtype, "Ambiance color is R: %lu, V: %lu, B: %lu, W: %lu\n",(Modlynx.V_AMB >> 24), ((Modlynx.V_AMB >> 16) & 0xFF), ((Modlynx.V_AMB >> 8) & 0xFF), (Modlynx.V_AMB & 0xFF));
+	reprap.GetPlatform().MessageF(mtype, "Button color is : %c, %c, %c\n", (Modlynx.V_VER >> 2?'R':'_'), ((Modlynx.V_VER >> 1)&2?'V':'_'), ((Modlynx.V_VER)&1?'B':'_'));
+
+	for (size_t i = 0; i < NumChamberHeaters; i++) {
+		const int8_t chamberHeater = reprap.GetHeat().GetChamberHeater(i);
+		if (chamberHeater >= 0) {
+			float chamberPWM = reprap.GetHeat().GetAveragePWM(chamberHeater);
+			float chamberTemp = reprap.GetHeat().GetTemperature(chamberHeater);
+			float heatingPWM = (chamberPWM/4.0)+0.25;
+			float coolingPWM = (chamberTemp < 165.0 ? (1.5*chamberTemp)/255.0 : 1.0);
+			if(heatingPWM > coolingPWM && chamberPWM > 0.01) {
+				reprap.GetPlatform().MessageF(mtype, "Chamber heater fan %d is at: %.2f%% (heating) \n", i, (double)(heatingPWM * 100.0));
+			} else {
+				reprap.GetPlatform().MessageF(mtype, "Chamber heater fan %d is at: %.2f%% (cooling) \n", i, (double)(coolingPWM * 100.0));
+			}
+		}
+	}
 	// TODO: Define the parameters to log
 }
 #endif
