@@ -8,17 +8,19 @@
 #ifndef SRC_NETWORKING_HTTPRESPONDER_H_
 #define SRC_NETWORKING_HTTPRESPONDER_H_
 
-#include "NetworkResponder.h"
+#include "UploadingNetworkResponder.h"
 
-class HttpResponder : public NetworkResponder
+class HttpResponder : public UploadingNetworkResponder
 {
 public:
 	HttpResponder(NetworkResponder *n);
 	bool Spin() override;								// do some work, returning true if we did anything significant
 	bool Accept(Socket *s, NetworkProtocol protocol) override;	// ask the responder to accept this connection, returns true if it did
-	void Terminate(NetworkProtocol protocol) override;			// terminate the responder if it is serving the specified protocol
+	void Terminate(NetworkProtocol protocol, NetworkInterface *interface) override;	// terminate the responder if it is serving the specified protocol on the specified interface
 	void Diagnostics(MessageType mtype) const override;
 
+	static void InitStatic();
+	static void Disable();
 	static void HandleGCodeReply(const char *reply);
 	static void HandleGCodeReply(OutputBuffer *reply);
 	static uint32_t GetReplySeq() { return seq; }
@@ -26,7 +28,6 @@ public:
 	static void CommonDiagnostics(MessageType mtype);
 
 protected:
-	void ConnectionLost() override;
 	void CancelUpload() override;
 	void SendData() override;
 
@@ -37,6 +38,8 @@ private:
 	static const size_t MaxQualKeys = 5;				// max number of key/value pairs in the qualifier
 	static const size_t MaxHeaders = 30;				// max number of key/value pairs in the headers
 	static const uint32_t HttpSessionTimeout = 8000;	// HTTP session timeout in milliseconds
+	static const uint32_t MaxFileInfoGetTime = 2000;	// maximum length of time we spend getting file info, to avoid the client timing out (actual time will be a little longer than this)
+	static const uint32_t MaxBufferWaitTime = 1000;		// maximum length of time we spend waiting for a buffer before we discard gcodeReply buffers
 
 	enum class HttpParseState
 	{
@@ -63,7 +66,7 @@ private:
 	// HTTP sessions
 	struct HttpSession
 	{
-		uint32_t ip;
+		IPAddress ip;
 		uint32_t lastQueryTime;
 		bool isPostUploading;
 		uint16_t postPort;
@@ -79,8 +82,9 @@ private:
 	void SendJsonResponse(const char* command);
 	bool GetJsonResponse(const char* request, OutputBuffer *&response, bool& keepOpen);
 	void ProcessMessage();
+	void ProcessRequest();
 	void RejectMessage(const char* s, unsigned int code = 500);
-	bool SendFileInfo();
+	bool SendFileInfo(bool quitEarly);
 
 	void DoUpload();
 
@@ -102,7 +106,8 @@ private:
 	size_t numHeaderKeys;							// number of keys we have found, <= maxHeaders
 
 	// rr_fileinfo requests
-	char filenameBeingProcessed[MaxFilenameLength];	// The filename being processed (for rr_fileinfo)
+	uint32_t startedProcessingRequestAt;			// when we started processing the current HTTP request
+	// rr_fileinfo also uses fileBeingProcessed in the networkResponder class
 
 	// Keeping track of HTTP sessions
 	static HttpSession sessions[MaxHttpSessions];
@@ -110,10 +115,9 @@ private:
 	static unsigned int clientsServed;
 
 	// Responses from GCodes class
-	static uint32_t seq;							// Sequence number for G-Code replies
-	static OutputStack *gcodeReply;
-
-	static NetworkResponderLock fileInfoLock;		// PrintMonitor::GetFileInfoResponse is single threaded at present, so use this to control access
+	static volatile uint32_t seq;					// Sequence number for G-Code replies
+	static volatile OutputStack gcodeReply;
+	static Mutex gcodeReplyMutex;
 };
 
 #endif /* SRC_NETWORKING_HTTPRESPONDER_H_ */

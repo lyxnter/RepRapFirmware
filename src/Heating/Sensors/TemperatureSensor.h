@@ -3,6 +3,7 @@
 
 #include "RepRapFirmware.h"
 #include "Heating/TemperatureError.h"		// for result codes
+#include "GCodes/GCodeResult.h"
 
 class GCodeBuffer;
 
@@ -11,16 +12,16 @@ class TemperatureSensor
 public:
 	TemperatureSensor(unsigned int chan, const char *type);
 
+	// Try to get a temperature reading
+	TemperatureError GetTemperature(float& t);
+
 	// Configure the sensor from M305 parameters.
 	// If we find any parameters, process them and return true. If an error occurs while processing them, set 'error' to true and write an error message to 'reply.
 	// if we find no relevant parameters, report the current parameters to 'reply' and return 'false'.
-	virtual bool Configure(unsigned int mCode, unsigned int heater, GCodeBuffer& gb, const StringRef& reply, bool& error);
+	virtual GCodeResult Configure(unsigned int mCode, unsigned int heater, GCodeBuffer& gb, const StringRef& reply);
 
 	// Initialise or re-initialise the temperature sensor
 	virtual void Init() = 0;
-
-	// Try to get a temperature reading
-	virtual TemperatureError GetTemperature(float& t) = 0;
 
 	// Return the channel number
 	unsigned int GetSensorChannel() const { return sensorChannel; }
@@ -40,11 +41,15 @@ public:
 	// Get the name. Returns nullptr if no name has been assigned.
 	const char *GetHeaterName() const { return heaterName; }
 
+	// Copy the basic details to the reply buffer
+	void CopyBasicHeaterDetails(unsigned int heater, const StringRef& reply) const;
+
 	// Factory method
 	static TemperatureSensor *Create(unsigned int channel);
 
 protected:
-	void CopyBasicHeaterDetails(unsigned int heater, const StringRef& reply) const;
+	// Try to get a temperature reading
+	virtual TemperatureError TryGetTemperature(float& t) = 0;
 
 	static TemperatureError GetPT100Temperature(float& t, uint16_t ohmsx100);		// shared function used by two derived classes
 
@@ -52,6 +57,7 @@ private:
 	const unsigned int sensorChannel;
 	const char * const sensorType;
 	const char *heaterName;
+	TemperatureError lastError;
 };
 
 #endif // TEMPERATURESENSOR_H

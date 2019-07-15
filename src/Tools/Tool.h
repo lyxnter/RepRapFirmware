@@ -26,7 +26,11 @@ Licence: GPL
 #ifndef TOOL_H_
 #define TOOL_H_
 
-#include "../RepRapFirmware.h"
+#include "RepRapFirmware.h"
+
+#undef array
+#include <functional>
+#define array _ecv_array
 
 constexpr size_t ToolNameLength = 32;						// maximum allowed length for tool names
 constexpr AxesBitmap DefaultXAxisMapping = 1u << X_AXIS;	// by default, X is mapped to X
@@ -45,7 +49,7 @@ class Tool
 {
 public:
 
-	static Tool *Create(int toolNumber, const char *name, long d[], size_t dCount, long h[], size_t hCount, AxesBitmap xMap, AxesBitmap yMap, FansBitmap fanMap, const StringRef& reply);
+	static Tool *Create(unsigned int toolNumber, const char *name, int32_t d[], size_t dCount, int32_t h[], size_t hCount, AxesBitmap xMap, AxesBitmap yMap, FansBitmap fanMap, const StringRef& reply);
 	static void Delete(Tool *t);
 
 	float GetOffset(size_t axis) const pre(axis < MaxAxes);
@@ -58,8 +62,6 @@ public:
 	int Heater(size_t heaterNumber) const;
 	const char *GetName() const;
 	int Number() const;
-	void SetVariables(const float* standby, const float* active);
-	void GetVariables(float* standby, float* active) const;
 	void DefineMix(const float m[]);
 	const float* GetMix() const;
 	float MaxFeedrate() const;
@@ -70,7 +72,17 @@ public:
 	Filament *GetFilament() const { return filament; }
 	Tool *Next() const { return next; }
 	ToolState GetState() const { return state; }
-	bool WriteSettings(FileStore *f) const;			// write the tool's settings to file
+	bool WriteSettings(FileStore *f, bool isCurrent) const;			// write the tool's settings to file
+
+	float GetToolHeaterActiveTemperature(size_t heaterNumber) const;
+	float GetToolHeaterStandbyTemperature(size_t heaterNumber) const;
+	void SetToolHeaterActiveTemperature(size_t heaterNumber, float temp);
+	void SetToolHeaterStandbyTemperature(size_t heaterNumber, float temp);
+
+	bool HasTemperatureFault() const { return heaterFault; }
+
+	void IterateExtruders(std::function<void(unsigned int)> f) const;
+	void IterateHeaters(std::function<void(int)> f) const;
 
 	friend class RepRap;
 
@@ -90,22 +102,23 @@ private:
 	void SetTemperatureFault(int8_t dudHeater);
 	void ResetTemperatureFault(int8_t wasDudHeater);
 	bool AllHeatersAtHighTemperature(bool forExtrusion) const;
+	bool UsesHeater(int8_t heater) const;
 
 	Tool* next;
 	Filament *filament;
-	char *name;
+	const char *name;
 	float offset[MaxAxes];
-	float mix[MaxExtruders];
-	float activeTemperatures[Heaters];
-	float standbyTemperatures[Heaters];
-	size_t driveCount;
-	size_t heaterCount;
-	int myNumber;
+	float mix[MaxExtrudersPerTool];
+	float activeTemperatures[MaxHeatersPerTool];
+	float standbyTemperatures[MaxHeatersPerTool];
+	uint8_t driveCount;
+	uint8_t heaterCount;
+	uint16_t myNumber;
 	AxesBitmap xMapping, yMapping;
 	AxesBitmap axisOffsetsProbed;
 	FansBitmap fanMapping;
-	uint8_t drives[MaxExtruders];
-	int8_t heaters[Heaters];
+	uint8_t drives[MaxExtrudersPerTool];
+	int8_t heaters[MaxHeatersPerTool];
 
 	ToolState state;
 	bool heaterFault;

@@ -134,10 +134,12 @@ bool PolarKinematics::IsReachable(float x, float y, bool isCoordinated) const
 }
 
 // Limit the Cartesian position that the user wants to move to, returning true if any coordinates were changed
-bool PolarKinematics::LimitPosition(float position[], size_t numAxes, AxesBitmap axesHomed, bool isCoordinated) const
+LimitPositionResult PolarKinematics::LimitPosition(float finalCoords[], const float * null initialCoords, size_t numAxes, AxesBitmap axesHomed, bool isCoordinated, bool applyM208Limits) const
 {
-	const bool m208Limited = Kinematics::LimitPositionFromAxis(position, Z_AXIS, numAxes, axesHomed);	// call base class function to limit Z and higher axes
-	const float r2 = fsquare(position[0]) + fsquare(position[1]);
+	const bool m208Limited = (applyM208Limits)
+								? Kinematics::LimitPositionFromAxis(finalCoords, Z_AXIS, numAxes, axesHomed)	// call base class function to limit Z and higher axes
+								: false;
+	const float r2 = fsquare(finalCoords[X_AXIS]) + fsquare(finalCoords[Y_AXIS]);
 	bool radiusLimited;
 	if (r2 < minRadiusSquared)
 	{
@@ -145,28 +147,28 @@ bool PolarKinematics::LimitPosition(float position[], size_t numAxes, AxesBitmap
 		const float r = sqrtf(r2);
 		if (r < 0.01)
 		{
-			position[0] = minRadius;
-			position[1] = 0.0;
+			finalCoords[X_AXIS] = minRadius;
+			finalCoords[Y_AXIS] = 0.0;
 		}
 		else
 		{
-			position[0] *= minRadius/r;
-			position[1] *= minRadius/r;
+			finalCoords[X_AXIS] *= minRadius/r;
+			finalCoords[Y_AXIS] *= minRadius/r;
 		}
 	}
 	else if (r2 > maxRadiusSquared)
 	{
 		radiusLimited = true;
 		const float r = sqrtf(r2);
-		position[0] *= maxRadius/r;
-		position[1] *= maxRadius/r;
+		finalCoords[X_AXIS] *= maxRadius/r;
+		finalCoords[Y_AXIS] *= maxRadius/r;
 	}
 	else
 	{
 		radiusLimited = false;
 	}
 
-	return m208Limited || radiusLimited;
+	return (m208Limited || radiusLimited) ? LimitPositionResult::adjusted : LimitPositionResult::ok;
 }
 
 // Return the initial Cartesian coordinates we assume after switching to this kinematics
@@ -205,19 +207,23 @@ AxesBitmap PolarKinematics::MustBeHomedAxes(AxesBitmap axesMoving, bool disallow
 // If we can proceed with homing some axes, return the name of the homing file to be called. Optionally, update 'alreadyHomed' to indicate
 // that some additional axes should be considered not homed.
 // If we can't proceed because other axes need to be homed first, return nullptr and pass those axes back in 'mustBeHomedFirst'.
-const char* PolarKinematics::GetHomingFileName(AxesBitmap toBeHomed, AxesBitmap alreadyHomed, size_t numVisibleAxes, AxesBitmap& mustHomeFirst) const
+AxesBitmap PolarKinematics::GetHomingFileName(AxesBitmap toBeHomed, AxesBitmap alreadyHomed, size_t numVisibleAxes, const StringRef& filename) const
 {
 	// Ask the base class which homing file we should call first
-	const char* ret = Kinematics::GetHomingFileName(toBeHomed, alreadyHomed, numVisibleAxes, mustHomeFirst);
-	// Change the returned name if it is X or Y
-	if (ret == StandardHomingFileNames[X_AXIS])
+	AxesBitmap ret = Kinematics::GetHomingFileName(toBeHomed, alreadyHomed, numVisibleAxes, filename);
+	if (ret == 0)
 	{
-		ret = HomeRadiusFileName;
+		// Change the returned name if it is X or Y
+		if (StringEqualsIgnoreCase(filename.c_str(), "homex.g"))
+		{
+			filename.copy(HomeRadiusFileName);
+		}
+		else if (StringEqualsIgnoreCase(filename.c_str(), "homey.g"))
+		{
+			filename.copy(HomeBedFileName);
+		}
 	}
-	else if (ret == StandardHomingFileNames[Y_AXIS])
-	{
-		ret = HomeBedFileName;
-	}
+
 	return ret;
 }
 
@@ -251,13 +257,29 @@ void PolarKinematics::OnHomingSwitchTriggered(size_t axis, bool highEnd, const f
 
 // Limit the speed and acceleration of a move to values that the mechanics can handle.
 // The speeds in Cartesian space have already been limited.
-void PolarKinematics::LimitSpeedAndAcceleration(DDA& dda, const float *normalisedDirectionVector) const
+void PolarKinematics::LimitSpeedAndAcceleration(DDA& dda, const float *normalisedDirectionVector, size_t numVisibleAxes, bool continuousRotationShortcut) const
 {
-	const int32_t turntableMovement = labs(dda.DriveCoordinates()[1] - dda.GetPrevious()->DriveCoordinates()[1]);
+	int32_t turntableMovement = labs(dda.DriveCoordinates()[1] - dda.GetPrevious()->DriveCoordinates()[1]);
 	if (turntableMovement != 0)
 	{
-		const float stepRatio = dda.GetTotalDistance() * reprap.GetPlatform().DriveStepsPerUnit(1)/turntableMovement;
-		dda.LimitSpeedAndAcceleration(stepRatio * maxTurntableSpeed, stepRatio * maxTurntableAcceleration);
+		const float stepsPerDegree = reprap.GetPlatform().DriveStepsPerUnit(1);
+		if (continuousRotationShortcut)
+		{
+			const int32_t stepsPerRotation = lrintf(360.0 * stepsPerDegree);
+			if (turntableMovement > stepsPerRotation/2)
+			{
+				turntableMovement -= stepsPerRotation;
+			}
+			else if (turntableMovement < -stepsPerRotation/2)
+			{
+				turntableMovement += stepsPerRotation;
+			}
+		}
+		if (turntableMovement != 0)
+		{
+			const float stepRatio = dda.GetTotalDistance() * stepsPerDegree/abs(turntableMovement);
+			dda.LimitSpeedAndAcceleration(stepRatio * maxTurntableSpeed, stepRatio * maxTurntableAcceleration);
+		}
 	}
 }
 
@@ -265,6 +287,13 @@ void PolarKinematics::LimitSpeedAndAcceleration(DDA& dda, const float *normalise
 bool PolarKinematics::IsContinuousRotationAxis(size_t axis) const
 {
 	return axis == 1;
+}
+
+// Return a bitmap of axes that move linearly in response to the correct combination of linear motor movements.
+// This is called to determine whether we can babystep the specified axis independently of regular motion.
+AxesBitmap PolarKinematics::GetLinearAxes() const
+{
+	return MakeBitmap<AxesBitmap>(Z_AXIS);
 }
 
 // Update the derived parameters after the master parameters have been changed

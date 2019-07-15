@@ -26,26 +26,18 @@ Logger::Logger() : logFile(), lastFlushTime(0), lastFlushFileSize(0), dirty(fals
 {
 }
 
-#define LOG_HEADER_LENGTH 330 // lynxmod
-char log_header[LOG_HEADER_LENGTH];
-
 void Logger::Start(time_t time, const StringRef& filename)
 {
 	if (!inLogger)
 	{
 		Lock loggerLock(inLogger);
-		FileStore * const f = reprap.GetPlatform().OpenFile(SYS_DIR, filename.Pointer(), OpenMode::append);
+		FileStore * const f = reprap.GetPlatform().OpenSysFile(filename.c_str(), OpenMode::append);
 		if (f != nullptr)
 		{
 			logFile.Set(f);
 			lastFlushFileSize = logFile.Length();
 			logFile.Seek(lastFlushFileSize);
-
-			strcpy(log_header, "Time;Event;Status;Bed;H1;H2;H3;Chamber;Bed Active;H1 Active;H2 Active;H3 Active;Chamber Active;"
-					"Bed Standby;H1 Standby;H2 Standby;H3 Standby;Chamber Standby;Bed mode;H1 mode;H2 mode;H3 mode;Chamber mode;"
-					"User X;User Y;User Z;Machine X;Machine Y;Machine Z;Speed;Z-Probe;Fan1%;Fan2%;Fan3%;Fan4%;Fan5%;Fan6%;Fan7%;Fan8%;Fan9%;\n");
-			logFile.Write(log_header, strlen(log_header));
-			InternalLogMessage(time, ";Event logging started;\n");
+			InternalLogMessage(time, "Event logging started\n");
 		}
 	}
 }
@@ -55,7 +47,7 @@ void Logger::Stop(time_t time)
 	if (logFile.IsLive() && !inLogger)
 	{
 		Lock loggerLock(inLogger);
-		InternalLogMessage(time, ";Event logging stopped;\n");
+		InternalLogMessage(time, "Event logging stopped\n");
 		logFile.Close();
 	}
 }
@@ -158,7 +150,7 @@ bool Logger::WriteDateTime(time_t time)
 		buf.printf("%04u-%02u-%02u %02u:%02u:%02u ",
 						timeInfo->tm_year + 1900, timeInfo->tm_mon + 1, timeInfo->tm_mday, timeInfo->tm_hour, timeInfo->tm_min, timeInfo->tm_sec);
 	}
-	return logFile.Write(buf.Pointer());
+	return logFile.Write(buf.c_str());
 }
 
 // End

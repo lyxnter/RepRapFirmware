@@ -9,10 +9,13 @@
 #include "SX1509.h"
 #include "Platform.h"
 #include "RepRap.h"
+#include "Wire.h"
+#include "Hardware/I2C.h"
 
 namespace DuetExpansion
 {
-	const uint8_t DueXnAddress = 0x3E;					// address of the SX1509B on the DueX2/DueX5
+	constexpr uint8_t DueXnAddress = 0x3E;						// address of the SX1509B on the DueX2/DueX5
+	static constexpr unsigned int DueXTaskStackWords = 100;		// task stack size in dwords
 
 	static SX1509 dueXnExpander;
 	static uint16_t dueXnInputMask;
@@ -25,7 +28,12 @@ namespace DuetExpansion
 	static bool additionalIoExpanderPresent = false;
 	static uint16_t additionalIoInputBits = 0;
 
-	// The original DueX2 and DueX5 boards had 2 board ID pins, bits 14 an 15.
+	static volatile bool taskWaiting = false;
+	static volatile bool inputsChanged = false;
+
+	Task<DueXTaskStackWords> *dueXTask = nullptr;
+
+	// The original DueX2 and DueX5 boards had 2 board ID pins, bits 14 and 15.
 	// The new ones use bit 15 for fan 8, so not we just have bit 14.
 	// If we want any more variants, they will have to use a different I2C address.
 	const uint16_t BoardTypePins = (1u << 14);
@@ -54,18 +62,56 @@ namespace DuetExpansion
 	const unsigned int Gpio4Bit = 8;
 	const uint16_t AllGpioBits = (1u << Gpio1Bit) | (1u << Gpio2Bit) | (1u << Gpio3Bit) | (1u <<Gpio4Bit);
 
+	// ISR for when the SX1509B on the DueX indicates that the state of an input has changed.
+	// Note, we must only wake up the DueX task if it is waiting on this specific interrupt.
+	// Otherwise we might wake it prematurely when it is waiting for an I2C transaction to be completed.
+	static void DueXIrq(CallbackParameter p)
+	{
+		inputsChanged = true;
+		if (taskWaiting)
+		{
+			taskWaiting = false;
+			dueXTask->GiveFromISR();
+		}
+	}
+
+	extern "C" [[noreturn]] void DueXTask(void * pvParameters)
+	{
+		for (;;)
+		{
+			inputsChanged = false;
+			dueXnInputBits = dueXnExpander.digitalReadAll();
+
+			cpu_irq_disable();
+			if (!inputsChanged)
+			{
+				taskWaiting = true;
+				cpu_irq_enable();
+				TaskBase::Take();
+			}
+			else
+			{
+				cpu_irq_enable();
+			}
+		}
+	}
+
 	// Identify which expansion board (if any) is attached and initialise it
 	ExpansionBoardType DueXnInit()
 	{
-		reprap.GetPlatform().InitI2c();					// initialise I2C
+		I2C::Init();										// initialise I2C
 
-		bool ret = dueXnExpander.begin(DueXnAddress);
-		if (!ret)
+		// DC 2018-07-12: occasionally the SX1509B isn't found after doing a software reset, so try a few more attempts
+		bool ret;
+		unsigned int attempts = 0;
+		do
 		{
-			delay(100);									// wait a little while
-			ret = dueXnExpander.begin(DueXnAddress);	// do 1 retry
-		}
-		//ret = false;
+			++attempts;
+			delay(50);
+			ret = dueXnExpander.begin(DueXnAddress);
+		} while (!ret && attempts < 5);
+		(void)I2C_IFACE.GetErrorCounts(true);				// clear the error counts in case there wasn't a device there or we didn't find it first time
+		//ret = false; // LYNXMOD
 		if (ret)
 		{
 			dueXnExpander.pinModeMultiple(BoardTypePins, INPUT_PULLUP);
@@ -89,10 +135,13 @@ namespace DuetExpansion
 			// Set up the interrupt on any input change
 			dueXnInputMask = stopBits | AllGpioBits;
 			dueXnExpander.enableInterruptMultiple(dueXnInputMask, INTERRUPT_MODE_CHANGE);
+			attachInterrupt(DueX_INT, DueXIrq, InterruptMode::INTERRUPT_MODE_FALLING, nullptr);
 
 			// Clear any initial interrupts
-			(void)dueXnExpander.interruptSource(true);
-			dueXnInputBits = dueXnExpander.digitalReadAll();
+			(void)dueXnExpander.interruptSourceAndClear();
+
+			dueXTask = new Task<DueXTaskStackWords>();
+			dueXTask->Create(DueXTask, "DUEX", nullptr, TaskPriority::DueXPriority);
 		}
 
 		return dueXnBoardType;
@@ -101,15 +150,18 @@ namespace DuetExpansion
 	// Look for an additional output pin expander
 	void AdditionalOutputInit()
 	{
-		reprap.GetPlatform().InitI2c();										// initialise I2C
-		bool ret = additionalIoExpander.begin(AdditionalIoExpanderAddress);
-		if (!ret)
-		{
-			delay(100);														// wait a little while
-			ret = additionalIoExpander.begin(AdditionalIoExpanderAddress);	// do 1 retry
-		}
-		//ret = false;
+		I2C::Init();										// initialise I2C
 
+		bool ret;
+		unsigned int attempts = 0;
+		do
+		{
+			++attempts;
+			delay(50);
+			ret = additionalIoExpander.begin(AdditionalIoExpanderAddress);
+		} while (!ret && attempts < 5);
+		(void)I2C_IFACE.GetErrorCounts(true);				// clear the error counts in case there wasn't a device there or we didn't find it first time
+		//ret = false; // LYNXMOD
 		if (ret)
 		{
 			additionalIoExpander.pinModeMultiple((1u << 16) - 1, INPUT_PULLDOWN);
@@ -138,19 +190,6 @@ namespace DuetExpansion
 	const char* array null GetAdditionalExpansionBoardName()
 	{
 		return (additionalIoExpanderPresent) ? "SX1509B expander" : nullptr;
-	}
-
-	// Update the input bits. The purpose of this is so that the step interrupt can pick up values that are fairly up-to-date,
-	// even though it is not safe for it to call expander.digitalReadAll(). When we move to RTOS, this will be a high priority task.
-	void Spin(bool full)
-	{
-		if (dueXnBoardType != ExpansionBoardType::none && !digitalRead(DueX_INT))
-		{
-			// Interrupt is active, so input data may have changed
-			dueXnInputBits = dueXnExpander.digitalReadAll();
-		}
-
-		// We don't have an interrupt from the additional I/O expander, so we don't poll it here
 	}
 
 	// Set the I/O mode of a pin
@@ -197,14 +236,14 @@ namespace DuetExpansion
 	}
 
 	// Read a pin
-	// We need to use the SX15089 interrupt to read the data register using interrupts, and just retrieve that value here.
+	// We need to use the SX1509 interrupt to read the data register using interrupts, and just retrieve that value here.
 	bool DigitalRead(Pin pin)
 	{
 		if (pin >= DueXnExpansionStart && pin < DueXnExpansionStart + 16)
 		{
 			if (dueXnBoardType != ExpansionBoardType::none)
 			{
-				if (!digitalRead(DueX_INT) && !inInterrupt())		// we must not call expander.digitalRead() from within an ISR
+				if (!digitalRead(DueX_INT) && !inInterrupt() && __get_BASEPRI() == 0)	// we must not call expander.digitalRead() from within an ISR or if the tick interrupt is disabled
 				{
 					// Interrupt is active, so input data may have changed
 					dueXnInputBits = dueXnExpander.digitalReadAll();
@@ -219,7 +258,7 @@ namespace DuetExpansion
 			{
 				// We don't have an interrupt from the additional I/O expander, so always read fresh data.
 				// If this is called from inside an ISR, we will get stale data.
-				if (!inInterrupt())									// we must not call expander.digitalRead() from within an ISR
+				if (!inInterrupt() && __get_BASEPRI() == 0)								// we must not call expander.digitalRead() from within an ISR
 				{
 					additionalIoInputBits = additionalIoExpander.digitalReadAll();
 				}
@@ -270,17 +309,18 @@ namespace DuetExpansion
 	}
 
 	// Print diagnostic data
+	// I2C error counts are now reported by Platform, so nothing to report here.
 	void Diagnostics(MessageType mtype)
 	{
 		Platform& p = reprap.GetPlatform();
 		p.Message(mtype, "=== Expansion ===\n");
 		if (dueXnBoardType != ExpansionBoardType::none)
 		{
-			p.MessageF(mtype, "DueX I2C errors %" PRIu32 "\n", dueXnExpander.GetErrorCount());
+			p.MessageF(mtype, "DueX I2C errors now reported in \"=== Platform ===\"\n");//%" PRIu32 "\n", dueXnExpander.GetErrorCount());
 		}
 		if (additionalIoExpanderPresent)
 		{
-			p.MessageF(mtype, "Additional expander I2C errors %" PRIu32 "\n", additionalIoExpander.GetErrorCount());
+			p.MessageF(mtype, "Additional expander I2C errors now reported in  \"=== Platform ===\"\n");//%" PRIu32 "\n", additionalIoExpander.GetErrorCount());
 		}
 	}
 

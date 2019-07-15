@@ -46,12 +46,14 @@
 #include "RepRap.h"
 #include "Webserver.h"
 #include "Version.h"
-#include "Libraries/General/IP4String.h"
+#include "General/IP4String.h"
+
+#include "ethernet_sam.h"
+
+#define SUPPORT_MDNS	0	// LWIP v1 MDNS responder code is buggy, it tries to allocate PBUFs and assumes that allocation always succeeds
 
 extern "C"
 {
-#include "ethernet_sam.h"
-
 #include "lwipopts.h"
 
 #ifdef LWIP_STATS
@@ -62,7 +64,10 @@ extern "C"
 #include "lwip/src/include/lwip/tcp_impl.h"
 
 #include "contrib/apps/netbios/netbios.h"
-#include "contrib/apps/mdns/mdns_responder.h"
+
+#if SUPPORT_MDNS
+# include "contrib/apps/mdns/mdns_responder.h"
+#endif
 }
 
 static volatile bool lwipLocked = false;
@@ -72,12 +77,17 @@ const size_t NumProtocols = 3;																		// number of network protocols w
 const size_t HttpProtocolIndex = 0, FtpProtocolIndex = 1, TelnetProtocolIndex = 2;					// index of theHTTP service above
 const Port DefaultPortNumbers[NumProtocols] = { DefaultHttpPort, DefaultFtpPort, DefaultTelnetPort };
 const char * const ProtocolNames[NumProtocols] = { "HTTP", "FTP", "TELNET" };
+
+#if SUPPORT_MDNS
 const char * const MdnsServiceStrings[NumProtocols] = { "\x05_http\x04_tcp\x05local", "\x04_ftp\x04_tcp\x05local", "\x07_telnet\x04_tcp\x05local" };
+#endif
 
 static Port portNumbers[NumProtocols] = { DefaultHttpPort, DefaultFtpPort, DefaultTelnetPort };		// port number used for each protocol
 static bool protocolEnabled[NumProtocols] = { true, false, false };									// by default only HTTP is enabled
 static tcp_pcb *pcbs[NumProtocols] = { nullptr, nullptr, nullptr };
 static tcp_pcb *ftp_pasv_pcb = nullptr;
+
+#if SUPPORT_MDNS
 
 const size_t NumMdnsFixedProtocols = 1;			// what we need to add to the protocol index in order to access the corresponding entry in mdns_services
 static struct mdns_service mdns_services[NumMdnsFixedProtocols + NumProtocols] =
@@ -104,6 +114,8 @@ static const char *mdns_txt_records[] =
 	"version=" VERSION,
 	NULL
 };
+
+#endif
 
 static bool closingDataPort = false;
 
@@ -160,8 +172,11 @@ static void ethernet_rx_callback(uint32_t ul_status)
 
 static void conn_err(void *arg, err_t err)
 {
-	// Report the error to the monitor
-	reprap.GetPlatform().MessageF(UsbMessage, "Network: Connection error, code %d\n", err);
+	if (reprap.Debug(moduleNetwork) && !inInterrupt())
+	{
+		// Report the error to the monitor
+		reprap.GetPlatform().MessageF(UsbMessage, "Network: Connection error, code %d\n", err);
+	}
 
 	// Tell the higher levels about the error
 	ConnectionState *cs = (ConnectionState*)arg;
@@ -179,7 +194,10 @@ static err_t conn_recv(void *arg, tcp_pcb *pcb, pbuf *p, err_t err)
 	{
 		if (cs->pcb != pcb)
 		{
-			reprap.GetPlatform().Message(UsbMessage, "Network: Mismatched pcb in conn_recv!\n");
+			if (reprap.Debug(moduleNetwork) && !inInterrupt())
+			{
+				reprap.GetPlatform().Message(UsbMessage, "Network: Mismatched pcb in conn_recv!\n");
+			}
 			tcp_abort(pcb);
 			return ERR_ABRT;
 		}
@@ -390,6 +408,7 @@ void Network::ReportOneProtocol(size_t protocol, const StringRef& reply) const
 
 void Network::DoMdnsAnnounce()
 {
+#if SUPPORT_MDNS
 	// Fill in the table of services
 	size_t numServices = NumMdnsFixedProtocols;
 	for (size_t i = 0; i < NumProtocols; ++i)
@@ -405,6 +424,7 @@ void Network::DoMdnsAnnounce()
 	// We have patched mdns_responder_init so that it can be called more than once
 	mdns_responder_init(mdns_services, numServices, mdns_txt_records);
 	mdns_announce();
+#endif
 }
 
 void Network::Spin(bool full)
@@ -422,7 +442,6 @@ void Network::Spin(bool full)
 					UnlockLWIP();
 
 					platform.Message(UsbMessage, "Network down\n");
-					platform.ClassReport(longWait);
 					return;
 				}
 
@@ -457,7 +476,6 @@ void Network::Spin(bool full)
 
 						UnlockLWIP();
 						platform.MessageF(UsbMessage, "Network up, IP=%s\n", IP4String(ip).c_str());
-						platform.ClassReport(longWait);
 						return;
 					}
 				}
@@ -514,7 +532,6 @@ void Network::Spin(bool full)
 
 		UnlockLWIP();
 	}
-	platform.ClassReport(longWait);
 	webserver->Spin();
 }
 
@@ -777,7 +794,7 @@ const uint8_t *Network::GetIPAddress() const
 	return ethernet_get_ipaddress();
 }
 
-void Network::SetEthernetIPAddress(const uint8_t ipAddress[], const uint8_t netmask[], const uint8_t gateway[])
+void Network::SetEthernetIPAddress(IPAddress ipAddress, IPAddress netmask, IPAddress gateway)
 {
 	if (state == NetworkObtainingIP || state == NetworkActive)
 	{
@@ -814,10 +831,12 @@ void Network::SetHostname(const char *name)
 		strcpy(hostname, DEFAULT_HOSTNAME);
 	}
 
+#if SUPPORT_MDNS
 	if (state == NetworkActive)
 	{
 		mdns_update_hostname();
 	}
+#endif
 }
 
 void Network::SetMacAddress(unsigned int interface, const uint8_t mac[])
