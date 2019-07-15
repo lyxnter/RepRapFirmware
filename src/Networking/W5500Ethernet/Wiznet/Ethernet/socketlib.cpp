@@ -107,9 +107,9 @@ int8_t socket(uint8_t sn, uint8_t protocol, uint16_t port, uint8_t flag)
 	{
 	case Sn_MR_TCP:
 		{
-			IPAddress taddr;
-			getSIPR(taddr);
-			if (taddr.IsNull())
+			uint32_t taddr;
+			getSIPR((uint8_t*)&taddr);
+			if (taddr == 0)
 			{
 				return SOCKERR_SOCKINIT;
 			}
@@ -210,21 +210,27 @@ int8_t listen(uint8_t sn)
 	return SOCK_OK;
 }
 
-int8_t connect(uint8_t sn, IPAddress addr, uint16_t port)
+int8_t connect(uint8_t sn, uint8_t * addr, uint16_t port)
 {
 	CHECK_SOCKMODE(Sn_MR_TCP);
 	CHECK_SOCKINIT();
-	if (addr.IsNull() || addr.IsBroadcast() == 0)
 	{
-		return SOCKERR_IPINVALID;
+		uint32_t taddr = ((uint32_t)addr[0] & 0x000000FF);
+		taddr = (taddr << 8) + ((uint32_t)addr[1] & 0x000000FF);
+		taddr = (taddr << 8) + ((uint32_t)addr[2] & 0x000000FF);
+		taddr = (taddr << 8) + ((uint32_t)addr[3] & 0x000000FF);
+		if (taddr == 0xFFFFFFFF || taddr == 0)
+		{
+			return SOCKERR_IPINVALID;
+		}
 	}
 	
 	if (port == 0)
 	{
 		return SOCKERR_PORTZERO;
 	}
-	setSn_DIPR(sn, addr);
-	setSn_DPORT(sn, port);
+	setSn_DIPR(sn,addr);
+	setSn_DPORT(sn,port);
 	ExecCommand(sn, Sn_CR_CONNECT);
 	if (sock_io_mode & (1<<sn))
 	{
@@ -252,7 +258,7 @@ void disconnectNoWait(uint8_t sn)
 	ExecCommand(sn, Sn_CR_DISCON);
 }
 
-int32_t sendto(uint8_t sn, const uint8_t * buf, uint16_t len, IPAddress destIp, uint16_t port)
+int32_t sendto(uint8_t sn, const uint8_t * buf, uint16_t len, const uint8_t * addr, uint16_t port)
 {
 	switch(getSn_MR(sn) & 0x0F)
 	{
@@ -264,7 +270,11 @@ int32_t sendto(uint8_t sn, const uint8_t * buf, uint16_t len, IPAddress destIp, 
 	}
 
 	CHECK_SOCKDATA();
-	if (destIp.IsNull())
+	uint32_t taddr = ((uint32_t)addr[0]) & 0x000000FF;
+	taddr = (taddr << 8) + ((uint32_t)addr[1] & 0x000000FF);
+	taddr = (taddr << 8) + ((uint32_t)addr[2] & 0x000000FF);
+	taddr = (taddr << 8) + ((uint32_t)addr[3] & 0x000000FF);
+	if (taddr == 0)
 	{
 		return SOCKERR_IPINVALID;
 	}
@@ -278,8 +288,8 @@ int32_t sendto(uint8_t sn, const uint8_t * buf, uint16_t len, IPAddress destIp, 
 		return SOCKERR_SOCKSTATUS;
 	}
 
-	setSn_DIPR(sn, destIp);
-	setSn_DPORT(sn, port);
+	setSn_DIPR(sn,addr);
+	setSn_DPORT(sn,port);
 	uint16_t freesize = getSn_TxMAX(sn);
 	if (len > freesize)
 	{
@@ -508,10 +518,7 @@ int8_t  setsockopt(uint8_t sn, sockopt_type sotype, void* arg)
 		setSn_MSSR(sn,*(uint16_t*)arg);
 		break;
 	case SO_DESTIP:
- 	    {
- 	    	IPAddress ip((uint8_t*)arg);
- 	    	setSn_DIPR(sn, ip);
- 	    }
+		setSn_DIPR(sn, (uint8_t*)arg);
 		break;
 	case SO_DESTPORT:
 		setSn_DPORT(sn, *(uint16_t*)arg);
@@ -559,11 +566,7 @@ int8_t getsockopt(uint8_t sn, sockopt_type sotype, void* arg)
          *(uint8_t*) arg = getSn_MSSR(sn);
          break;
       case SO_DESTIP:
-      	 {
-      		 IPAddress ip;
-      		 getSn_DIPR(sn, ip);
-      		 ip.UnpackV4((uint8_t*)arg);
-   	     }
+         getSn_DIPR(sn, (uint8_t*)arg);
          break;
       case SO_DESTPORT:  
          *(uint16_t*) arg = getSn_DPORT(sn);

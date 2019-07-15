@@ -9,12 +9,6 @@
 #include "GCodes/GCodeBuffer.h"
 #include "Platform.h"
 #include "RepRap.h"
-#include "Movement/Move.h"
-
-// Unless we set the option to compare filament on all type of move, we reject readings if the last retract or reprime move wasn't completed
-// well before the start bit was received. This is because those moves have high accelerations and decelerations, so the measurement delay
-// is more likely to cause errors. This constant sets the delay required after a retract or reprime move before we accept the measurement.
-const int32_t SyncDelayMillis = 10;
 
 PulsedFilamentMonitor::PulsedFilamentMonitor(unsigned int extruder, int type)
 	: FilamentMonitor(extruder, type),
@@ -39,7 +33,7 @@ void PulsedFilamentMonitor::Reset()
 	extrusionCommandedThisSegment = extrusionCommandedSinceLastSync = movementMeasuredThisSegment = movementMeasuredSinceLastSync = 0.0;
 	comparisonStarted = false;
 	haveInterruptData = false;
-	wasPrintingAtInterrupt = false;			// force a resync
+	hadNonPrintingMoveSinceLastSync = true;			// force a resync
 }
 
 // Configure this sensor, returning true if error and setting 'seen' if we processed any configuration parameters
@@ -81,7 +75,7 @@ bool PulsedFilamentMonitor::Configure(GCodeBuffer& gb, const StringRef& reply, b
 	}
 	else
 	{
-		reply.printf("Pulse-type filament monitor on endstop input %u, %s, sensitivity %.3fmm/pulse, allowed movement %ld%% to %ld%%, check every %.1fmm, ",
+		reply.printf("Pulse-type filament monitor on endstop input %u, %s, sensitivity %.2fmm/pulse, allowed movement %ld%% to %ld%%, check every %.1fmm, ",
 						GetEndstopNumber(),
 						(comparisonEnabled) ? "enabled" : "disabled",
 						(double)mmPerPulse,
@@ -138,16 +132,12 @@ void PulsedFilamentMonitor::Poll()
 
 	if (haveInterruptData)					// if we have a synchronised value for the amount of extrusion commanded
 	{
-		if (wasPrintingAtInterrupt && (int32_t)(lastSyncTime - reprap.GetMove().ExtruderPrintingSince()) > SyncDelayMillis)
+		if (!hadNonPrintingMoveAtInterrupt)
 		{
-			// We can use this measurement
 			extrusionCommandedThisSegment += extrusionCommandedAtInterrupt;
 			movementMeasuredThisSegment += movementMeasuredSinceLastSync;
 		}
-		lastSyncTime = lastIsrTime;
-		extrusionCommandedSinceLastSync -= extrusionCommandedAtInterrupt;
 		movementMeasuredSinceLastSync = 0.0;
-
 		haveInterruptData = false;
 	}
 }
@@ -160,20 +150,29 @@ float PulsedFilamentMonitor::GetCurrentPosition() const
 
 // Call the following at intervals to check the status. This is only called when extrusion is in progress or imminent.
 // 'filamentConsumed' is the net amount of extrusion since the last call to this function.
-// 'isPrinting' is true unless a non-printing extruder move was in progress
+// 'hadNonPrintingMove' is true if filamentConsumed includes extruder movement from non-printing moves.
 // 'fromIsr' is true if this measurement was taken at the end of the ISR because the ISR returned true
-FilamentSensorStatus PulsedFilamentMonitor::Check(bool isPrinting, bool fromIsr, uint32_t isrMillis, float filamentConsumed)
+FilamentSensorStatus PulsedFilamentMonitor::Check(bool full, bool hadNonPrintingMove, bool fromIsr, float filamentConsumed)
 {
-	// 1. Update the extrusion commanded
-	extrusionCommandedSinceLastSync += filamentConsumed;
+	// 1. Update the extrusion commanded and whether we have had an extruding but non-printing move
+	if (hadNonPrintingMove)
+	{
+		hadNonPrintingMoveSinceLastSync = true;
+	}
+	else
+	{
+		extrusionCommandedSinceLastSync += filamentConsumed;
+	}
 
 	// 2. If this call passes values synced to the interrupt, save the data
 	if (fromIsr)
 	{
 		extrusionCommandedAtInterrupt = extrusionCommandedSinceLastSync;
-		wasPrintingAtInterrupt = isPrinting;
-		lastIsrTime = isrMillis;
+		hadNonPrintingMoveAtInterrupt = hadNonPrintingMoveSinceLastSync;
 		haveInterruptData = true;
+
+		extrusionCommandedSinceLastSync = 0.0;
+		hadNonPrintingMoveSinceLastSync = false;
 	}
 
 	// 3. Process the received data and update if we have received anything
@@ -181,17 +180,21 @@ FilamentSensorStatus PulsedFilamentMonitor::Check(bool isPrinting, bool fromIsr,
 
 	// 4. Decide whether it is time to do a comparison, and return the status
 	FilamentSensorStatus ret = FilamentSensorStatus::ok;
-	if (extrusionCommandedThisSegment >= minimumExtrusionCheckLength)
+	if (full)
 	{
-		ret = CheckFilament(extrusionCommandedThisSegment, movementMeasuredThisSegment, false);
-		extrusionCommandedThisSegment = movementMeasuredThisSegment = 0.0;
+		if (extrusionCommandedThisSegment >= minimumExtrusionCheckLength)
+		{
+			ret = CheckFilament(extrusionCommandedThisSegment, movementMeasuredThisSegment, false);
+			extrusionCommandedThisSegment = movementMeasuredThisSegment = 0.0;
+		}
+		else if (extrusionCommandedThisSegment + extrusionCommandedSinceLastSync >= minimumExtrusionCheckLength * 2 && millis() - lastMeasurementTime > 220)
+		{
+			// A sync is overdue
+			ret = CheckFilament(extrusionCommandedThisSegment + extrusionCommandedSinceLastSync, movementMeasuredThisSegment + movementMeasuredSinceLastSync, true);
+			extrusionCommandedThisSegment = extrusionCommandedSinceLastSync = movementMeasuredThisSegment = movementMeasuredSinceLastSync = 0.0;
+		}
 	}
-	else if (extrusionCommandedThisSegment + extrusionCommandedSinceLastSync >= minimumExtrusionCheckLength * 2 && millis() - lastMeasurementTime > 220)
-	{
-		// A sync is overdue
-		ret = CheckFilament(extrusionCommandedThisSegment + extrusionCommandedSinceLastSync, movementMeasuredThisSegment + movementMeasuredSinceLastSync, true);
-		extrusionCommandedThisSegment = extrusionCommandedSinceLastSync = movementMeasuredThisSegment = movementMeasuredSinceLastSync = 0.0;
-	}
+
 
 	return ret;
 }
@@ -261,10 +264,11 @@ FilamentSensorStatus PulsedFilamentMonitor::CheckFilament(float amountCommanded,
 }
 
 // Clear the measurement state - called when we are not printing a file. Return the present/not present status if available.
-FilamentSensorStatus PulsedFilamentMonitor::Clear()
+FilamentSensorStatus PulsedFilamentMonitor::Clear(bool full)
 {
 	Poll();								// to keep the diagnostics up to date
 	Reset();
+
 	return FilamentSensorStatus::ok;
 }
 

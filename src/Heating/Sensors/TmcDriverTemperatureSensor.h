@@ -17,9 +17,7 @@ class TmcDriverTemperatureSensor : public TemperatureSensor
 public:
 	TmcDriverTemperatureSensor(unsigned int channel);
 	void Init() override;
-
-protected:
-	TemperatureError TryGetTemperature(float& t) override;
+	TemperatureError GetTemperature(float& t) override;
 };
 
 #endif

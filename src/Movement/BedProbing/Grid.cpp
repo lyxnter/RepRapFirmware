@@ -17,25 +17,6 @@ const char * const GridDefinition::HeightMapLabelLines[] =
 	"xmin,xmax,ymin,ymax,radius,xspacing,yspacing,xnum,ynum"	// current version label line
 };
 
-#if SUPPORT_OBJECT_MODEL
-
-// Object model table and functions
-// Note: if using GCC version 7.3.1 20180622 and lambda functions are used in this table, you must compile this file with option -std=gnu++17.
-// Otherwise the table will be allocated in RAM instead of flash, which wastes too much RAM.
-
-// Macro to build a standard lambda function that includes the necessary type conversions
-#define OBJECT_MODEL_FUNC(_ret) OBJECT_MODEL_FUNC_BODY(GridDefinition, _ret)
-
-const ObjectModelTableEntry GridDefinition::objectModelTable[] =
-{
-	// These entries must be in alphabetical order
-	{ "radius", OBJECT_MODEL_FUNC(&(self->radius)), TYPE_OF(float), ObjectModelTableEntry::none }
-};
-
-DEFINE_GET_OBJECT_MODEL_TABLE(GridDefinition)
-
-#endif
-
 // Initialise the grid to be invalid
 GridDefinition::GridDefinition()
 	: xMin(0.0), xMax(-1.0), yMin(0.0), yMax(-1.0), radius(-1.0), xSpacing(0.0), ySpacing(0.0)
@@ -107,9 +88,9 @@ void GridDefinition::WriteHeadingAndParameters(const StringRef& s) const
 // Check the parameter label line, returning -1 if not recognised, else the version we found
 /*static*/ int GridDefinition::CheckHeading(const StringRef& s)
 {
-	for (size_t i = 0; i < ARRAY_SIZE(HeightMapLabelLines); ++i)
+	for (size_t i =0; i < ARRAY_SIZE(HeightMapLabelLines); ++i)
 	{
-		if (StringStartsWith(s.c_str(), HeightMapLabelLines[i]))
+		if (StringStartsWith(s.Pointer(), HeightMapLabelLines[i]))
 		{
 			return (int)i;
 		}
@@ -120,82 +101,34 @@ void GridDefinition::WriteHeadingAndParameters(const StringRef& s) const
 // Read the grid parameters from a string returning true if success
 bool GridDefinition::ReadParameters(const StringRef& s, int version)
 {
-	// 2018-04-08: rewrote this not to use sscanf because that function isn't thread safe
-	isValid = false;						// assume failure
-	const char *p = s.c_str();
-	const char *q;
-
-	xMin = SafeStrtof(p, &q);
-	if (p == q || *q != ',')
+	bool ok;
+	switch (version)
 	{
-		return false;
+	case 1:
+		ok = (sscanf(s.Pointer(), "%f,%f,%f,%f,%f,%f,%f,%lu,%lu", &xMin, &xMax, &yMin, &yMax, &radius, &xSpacing, &ySpacing, &numX, &numY) == 9);
+		break;
+
+	case 0:
+		ok = (sscanf(s.Pointer(), "%f,%f,%f,%f,%f,%f,%lu,%lu", &xMin, &xMax, &yMin, &yMax, &radius, &xSpacing, &numX, &numY) == 8);
+		if (ok)
+		{
+			ySpacing = xSpacing;
+		}
+		break;
+
+	default:
+		ok = false;
 	}
-	p = q + 1;
 
-	xMax = SafeStrtof(p, &q);
-	if (p == q || *q != ',')
+	if (ok)
 	{
-		return false;
-	}
-	p = q + 1;
-
-	yMin = SafeStrtof(p, &q);
-	if (p == q || *q != ',')
-	{
-		return false;
-	}
-	p = q + 1;
-
-	yMax = SafeStrtof(p, &q);
-	if (p == q || *q != ',')
-	{
-		return false;
-	}
-	p = q + 1;
-
-	radius = SafeStrtof(p, &q);
-	if (p == q || *q != ',')
-	{
-		return false;
-	}
-	p = q + 1;
-
-	xSpacing = SafeStrtof(p, &q);
-	if (p == q || *q != ',')
-	{
-		return false;
-	}
-	p = q + 1;
-
-	if (version == 0)
-	{
-		ySpacing = xSpacing;
+		CheckValidity();
 	}
 	else
 	{
-		ySpacing = SafeStrtof(p, &q);
-		if (p == q || *q != ',')
-		{
-			return false;
-		}
-		p = q + 1;
+		isValid = false;
 	}
-
-	numX = SafeStrtoul(p, &q);
-	if (p == q || *q != ',')
-	{
-		return false;
-	}
-	p = q + 1;
-
-	numY = SafeStrtoul(p, &q);
-	if (p == q)
-	{
-		return false;
-	}
-
-	CheckValidity();
-	return true;
+	return ok;
 }
 
 // Print what is wrong with the grid, appending it to the existing string
@@ -266,19 +199,19 @@ void HeightMap::SetGridHeight(size_t xIndex, size_t yIndex, float height)
 // Note that deltaX and deltaY may be negative
 unsigned int HeightMap::GetMinimumSegments(float deltaX, float deltaY) const
 {
-	const float xDistance = fabsf(deltaX);
+	const float xDistance = fabs(deltaX);
 	unsigned int xSegments = (xDistance > 0.0) ? (unsigned int)(xDistance * def.recipXspacing + 0.4) : 1;
 
-	const float yDistance = fabsf(deltaY);
+	const float yDistance = fabs(deltaY);
 	unsigned int ySegments = (yDistance > 0.0) ? (unsigned int)(yDistance * def.recipYspacing + 0.4) : 1;
 
 	return max<unsigned int>(xSegments, ySegments);
 }
 
 // Save the grid to file returning true if an error occurred
-bool HeightMap::SaveToFile(FileStore *f, float zOffset) const
+bool HeightMap::SaveToFile(FileStore *f) const
 {
-	String<StringLength500> bufferSpace;
+	String<500> bufferSpace;
 	const StringRef buf = bufferSpace.GetRef();
 
 	// Write the header comment
@@ -288,20 +221,19 @@ bool HeightMap::SaveToFile(FileStore *f, float zOffset) const
 		time_t timeNow = reprap.GetPlatform().GetDateTime();
 		const struct tm * const timeInfo = gmtime(&timeNow);
 		buf.catf(" generated at %04u-%02u-%02u %02u:%02u",
-						timeInfo->tm_year + 1900, timeInfo->tm_mon + 1, timeInfo->tm_mday, timeInfo->tm_hour, timeInfo->tm_min);
+						timeInfo->tm_year + 1900, timeInfo->tm_mon, timeInfo->tm_mday, timeInfo->tm_hour, timeInfo->tm_min);
 	}
-	float mean, deviation, minError, maxError;
-	(void)GetStatistics(mean, deviation, minError, maxError);
-	buf.catf(", min error %.3f, max error %.3f, mean %.3f, deviation %.3f\n",
-				(double)(minError + zOffset), (double)(maxError + zOffset), (double)(mean + zOffset), (double)deviation);
-	if (!f->Write(buf.c_str()))
+	float mean, deviation;
+	(void)GetStatistics(mean, deviation);
+	buf.catf(", mean error %.3f, deviation %.3f\n", (double)mean, (double)deviation);
+	if (!f->Write(buf.Pointer()))
 	{
 		return true;
 	}
 
 	// Write the grid parameters
 	def.WriteHeadingAndParameters(buf);
-	if (!f->Write(buf.c_str()))
+	if (!f->Write(buf.Pointer()))
 	{
 		return true;
 	}
@@ -319,7 +251,7 @@ bool HeightMap::SaveToFile(FileStore *f, float zOffset) const
 			}
 			if (IsHeightSet(index))
 			{
-				buf.catf("%7.3f", (double)(gridHeights[index] + zOffset));
+				buf.catf("%7.3f", (double)gridHeights[index]);
 			}
 			else
 			{
@@ -328,7 +260,7 @@ bool HeightMap::SaveToFile(FileStore *f, float zOffset) const
 			++index;
 		}
 		buf.cat('\n');
-		if (!f->Write(buf.c_str()))
+		if (!f->Write(buf.Pointer()))
 		{
 			return true;
 		}
@@ -390,10 +322,6 @@ bool HeightMap::LoadFromFile(FileStore *f, const StringRef& r)
 			const char *p = buffer;
 			for (uint32_t col = 0; col < def.numX; ++col)
 			{
-				while (*p == ' ' || *p == '\t')
-				{
-					++p;
-				}
 				if (*p == '0' && (p[1] == ',' || p[1] == 0))
 				{
 					// Values of 0 with no decimal places in un-probed values, so leave the point set as not valid
@@ -401,8 +329,8 @@ bool HeightMap::LoadFromFile(FileStore *f, const StringRef& r)
 				}
 				else
 				{
-					const char* np;
-					const float f = SafeStrtof(p, &np);
+					char* np = nullptr;
+					const float f = strtod(p, &np);
 					if (np == p)
 					{
 						r.catf("number expected at line %" PRIu32 " column %d", row + 3, (p - buffer) + 1);
@@ -423,30 +351,19 @@ bool HeightMap::LoadFromFile(FileStore *f, const StringRef& r)
 	return true;											// an error occurred
 }
 
-// Return number of points probed, mean and RMS deviation, min and max error
-unsigned int HeightMap::GetStatistics(float& mean, float& deviation, float& minError, float& maxError) const
+// Return number of points probed, mean and RMS deviation
+unsigned int HeightMap::GetStatistics(float& mean, float& deviation) const
 {
 	double heightSum = 0.0, heightSquaredSum = 0.0;
-	minError = 9999.0;
-	maxError = -9999.0;
 	unsigned int numProbed = 0;
 	for (uint32_t i = 0; i < def.NumPoints(); ++i)
 	{
 		if (IsHeightSet(i))
 		{
 			++numProbed;
-			const float fHeightError = gridHeights[i];
-			if (fHeightError > maxError)
-			{
-				maxError = fHeightError;
-			}
-			if (fHeightError < minError)
-			{
-				minError = fHeightError;
-			}
-			const double dHeightError = (double)fHeightError;
-			heightSum += dHeightError;
-			heightSquaredSum += dsquare(dHeightError);
+			const double heightError = (double)gridHeights[i];
+			heightSum += heightError;
+			heightSquaredSum += dsquare(heightError);
 		}
 	}
 	if (numProbed == 0)

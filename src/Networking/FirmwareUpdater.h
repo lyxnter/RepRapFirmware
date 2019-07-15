@@ -8,7 +8,8 @@
 #ifndef SRC_NETWORKING_FIRMWAREUPDATER_H_
 #define SRC_NETWORKING_FIRMWAREUPDATER_H_
 
-#include "RepRapFirmware.h"
+#include <cstdint>
+#include "Libraries/General/StringRef.h"
 
 namespace FirmwareUpdater
 {

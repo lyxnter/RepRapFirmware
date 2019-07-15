@@ -52,16 +52,12 @@ public:
 	bool IsWiFiInterface() const override { return false; }
 
 	void UpdateHostname(const char *name) override { }
-	IPAddress GetIPAddress() const override { return ipAddress; }
-	void SetIPAddress(IPAddress p_ipAddress, IPAddress p_netmask, IPAddress p_gateway) override;
+	const uint8_t *GetIPAddress() const override { return ipAddress; }
 	void SetMacAddress(const uint8_t mac[]) override;
 	const uint8_t *GetMacAddress() const override { return macAddress; }
 
 	void OpenDataPort(Port port) override;
 	void TerminateDataPort() override;
-
-protected:
-	DECLARE_OBJECT_MODEL
 
 private:
 	enum class NetworkState
@@ -88,6 +84,7 @@ private:
 	void ReportOneProtocol(NetworkProtocol protocol, const StringRef& reply) const
 	pre(protocol < NumProtocols);
 
+	void SetIPAddress(const uint8_t p_ipAddress[], const uint8_t p_netmask[], const uint8_t p_gateway[]);
 	Platform& platform;
 	uint32_t lastTickMillis;
 
@@ -101,9 +98,9 @@ private:
 	bool activated;
 	bool usingDhcp;
 
-	IPAddress ipAddress;
-	IPAddress netmask;
-	IPAddress gateway;
+	uint8_t ipAddress[4];
+	uint8_t netmask[4];
+	uint8_t gateway[4];
 	uint8_t macAddress[6];
 };
 

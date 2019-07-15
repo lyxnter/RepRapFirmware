@@ -19,13 +19,15 @@ void RestorePoint::Init()
 		moveCoords[i] = 0.0;
 	}
 
-	feedRate = DefaultFeedRate * SecondsToMinutes;
+	feedRate = DefaultFeedrate * SecondsToMinutes;
 	virtualExtruderPosition = 0.0;
 	filePos = noFilePosition;
 	proportionDone = 0.0;
-#if SUPPORT_LASER || SUPPORT_IOBITS
-	laserPwmOrIoBits.Clear();
+
+#if SUPPORT_IOBITS
+	ioBits = 0;
 #endif
+
 	toolNumber = -1;
 }
 

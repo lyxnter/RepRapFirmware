@@ -16,20 +16,17 @@ public:
 	SimpleFilamentMonitor(unsigned int extruder, int type);
 
 	bool Configure(GCodeBuffer& gb, const StringRef& reply, bool& seen) override;
-	FilamentSensorStatus Check(bool isPrinting, bool fromIsr, uint32_t isrMillis, float filamentConsumed) override;
-	FilamentSensorStatus Clear() override;
+	FilamentSensorStatus Check(bool full, bool hadNonPrintingMove, bool fromIsr, float filamentConsumed) override;
+	FilamentSensorStatus Clear(bool full) override;
 	void Diagnostics(MessageType mtype, unsigned int extruder) override;
 	bool Interrupt() override;
 
 private:
+	uint64_t now, prev; // lynxMod
+	double totNoFilament;
 	void Poll();
-// LYNXMOD
-	uint32_t now, prev;
-	unsigned int noFilament;
 
-	bool highWhenNoFilament;
-	bool filamentPresent;
-	bool enabled;
+	bool highWhenNoFilament, filamentPresent, enabled;
 };
 
 #endif /* SRC_FILAMENTSENSORS_SIMPLEFILAMENTMONITOR_H_ */

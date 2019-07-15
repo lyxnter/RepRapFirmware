@@ -8,21 +8,14 @@
 #ifndef SRC_VERSION_H_
 #define SRC_VERSION_H_
 
-
 #ifndef VERSION
-#ifdef RTOS
-# define MAIN_VERSION	"2.03.lynx0.1"
-#else
-# define MAIN_VERSION	"1.24.lynx0.1"
-#endif
-
-# define VERSION MAIN_VERSION
+# define VERSION "1.21.4_LYNXTER_1.8.8_DEV"
 #endif
 
 #ifndef DATE
-# define DATE __DATE__ " " __TIME__ //"2019-01-02"
+# define DATE "2019-03-15"
 #endif
 
-#define AUTHORS "reprappro, dc42, chrishamm, t3p3, dnewman, printm3d, lynxter"
+#define AUTHORS "reprappro, dc42, chrishamm, t3p3, dnewman, bill, Lynxter"
 
 #endif /* SRC_VERSION_H_ */

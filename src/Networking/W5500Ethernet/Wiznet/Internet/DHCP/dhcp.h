@@ -118,22 +118,22 @@ void    DHCP_stop(void);
  * @brief Get IP address
  * @param ip  - IP address to be returned
  */
-IPAddress getIPfromDHCP();
+void getIPfromDHCP(uint8_t* ip);
 /*
  * @brief Get Gateway address
  * @param ip  - Gateway address to be returned
  */
-IPAddress getGWfromDHCP();
+void getGWfromDHCP(uint8_t* ip);
 /*
  * @brief Get Subnet mask value
  * @param ip  - Subnet mask to be returned
  */
-IPAddress getSNfromDHCP();
+void getSNfromDHCP(uint8_t* ip);
 /*
  * @brief Get DNS address
  * @param ip  - DNS address to be returned
  */
-IPAddress getDNSfromDHCP();
+void getDNSfromDHCP(uint8_t* ip);
 
 /*
  * @brief Get the leased time by DHCP sever

@@ -7,52 +7,45 @@
 #include "Libraries/Fatfs/ff.h"
 #include "GCodes/GCodeResult.h"
 #include "FileStore.h"
-#include "FileInfoParser.h"
-#include "RTOSIface/RTOSIface.h"
-
 #include <ctime>
 
 // Info returned by FindFirst/FindNext calls
 struct FileInfo
 {
-	time_t lastModified;
-	uint32_t size;
-	String<MaxFilenameLength> fileName;
 	bool isDirectory;
+	char fileName[MaxFilenameLength];
+	uint32_t size;
+	time_t lastModified;
 };
 
 class MassStorage
 {
 public:
-	static void CombineName(const StringRef& out, const char* directory, const char* fileName);
-	static const char* GetMonthName(const uint8_t month);
-
-	FileStore* OpenFile(const char* filePath, OpenMode mode, uint32_t preAllocSize);
+	FileStore* OpenFile(const char* directory, const char* fileName, OpenMode mode);
 	bool FindFirst(const char *directory, FileInfo &file_info);
 	bool FindNext(FileInfo &file_info);
-	void AbandonFindNext();
-	bool Delete(const char* filePath);
+	const char* GetMonthName(const uint8_t month);
+	const char* CombineName(const char* directory, const char* fileName);
+	bool Delete(const char* directory, const char* fileName, bool silent = false);
 	bool MakeDirectory(const char *parentDir, const char *dirName);
 	bool MakeDirectory(const char *directory);
-	bool Rename(const char *oldFilePath, const char *newFilePath);
-	bool FileExists(const char *filePath) const;
-	bool DirectoryExists(const StringRef& path) const;								// Warning: if 'path' has a trailing '/' or '\\' character, it will be removed!
+	bool Rename(const char *oldFilename, const char *newFilename);
+	bool FileExists(const char *file) const;
+	bool FileExists(const char* directory, const char *fileName) const;
 	bool DirectoryExists(const char *path) const;
-	time_t GetLastModifiedTime(const char *filePath) const;
-	bool SetLastModifiedTime(const char *file, time_t time);
+	bool DirectoryExists(const char* directory, const char* subDirectory);
+	time_t GetLastModifiedTime(const char* directory, const char *fileName) const;
+	bool SetLastModifiedTime(const char* directory, const char *file, time_t time);
 	GCodeResult Mount(size_t card, const StringRef& reply, bool reportSuccess);
 	GCodeResult Unmount(size_t card, const StringRef& reply);
 	bool IsDriveMounted(size_t drive) const { return drive < NumSdCards && info[drive].isMounted; }
 	bool CheckDriveMounted(const char* path);
 	bool IsCardDetected(size_t card) const;
-	unsigned int InvalidateFiles(const FATFS *fs, bool doClose);					// Invalidate all open files on the specified file system, returning the number of files invalidated
-	bool AnyFileOpen(const FATFS *fs) const;										// Return true if any files are open on the file system
+	unsigned int InvalidateFiles(const FATFS *fs, bool doClose);	// Invalidate all open files on the specified file system, returning the number of files invalidated
+	bool AnyFileOpen(const FATFS *fs) const;						// Return true if any files are open on the file system
 	void CloseAllFiles();
 	unsigned int GetNumFreeFiles() const;
 	void Spin();
-	const Mutex& GetVolumeMutex(size_t vol) const { return info[vol].volMutex; }
-	bool GetFileInfo(const char *filePath, GCodeFileInfo& info, bool quitEarly) { return infoParser.GetFileInfo(filePath, info, quitEarly); }
-	void RecordSimulationTime(const char *printingFilePath, uint32_t simSeconds);	// Append the simulated printing time to the end of the file
 
 	enum class InfoResult : uint8_t
 	{
@@ -87,23 +80,21 @@ private:
 		FATFS fileSystem;
 		uint32_t cdChangedTime;
 		uint32_t mountStartTime;
-		Mutex volMutex;
 		Pin cdPin;
 		bool mounting;
 		bool isMounted;
 		CardDetectState cardState;
 	};
 
-	unsigned int InternalUnmount(size_t card, bool doClose);
+	bool InternalUnmount(size_t card, bool doClose);
 	static time_t ConvertTimeStamp(uint16_t fdate, uint16_t ftime);
 
 	SdCardInfo info[NumSdCards];
 
-	Mutex fsMutex, dirMutex;
-
-	FileInfoParser infoParser;
 	DIR findDir;
+	char combinedName[MaxFilenameLength + 1];
 	FileWriteBuffer *freeWriteBuffers;
+
 	FileStore files[MAX_FILES];
 };
 

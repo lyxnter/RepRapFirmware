@@ -92,7 +92,7 @@ bool ZLeadscrewKinematics::SupportsAutoCalibration() const
 	return numLeadscrews >= 2;
 }
 
-// Perform auto calibration, returning true if failed. Override this implementation in kinematics that support it. Caller already owns the GCode movement lock.
+// Perform auto calibration. Override this implementation in kinematics that support it. Caller already owns the GCode movement lock.
 bool ZLeadscrewKinematics::DoAutoCalibration(size_t numFactors, const RandomProbePointSet& probePoints, const StringRef& reply)
 {
 	if (!SupportsAutoCalibration())			// should be checked by caller, but check it here too
@@ -229,17 +229,8 @@ bool ZLeadscrewKinematics::DoAutoCalibration(size_t numFactors, const RandomProb
 		PrintMatrix("Normal matrix", normalMatrix, numFactors, numFactors + 1);
 	}
 
-	if (!normalMatrix.GaussJordan(numFactors, numFactors + 1))
-	{
-		reply.copy("Unable to calculate screw corrections. Please choose different probe points.");
-		return true;
-	}
-
 	floatc_t solution[MaxLeadscrews];
-	for (size_t i = 0; i < numFactors; ++i)
-	{
-		solution[i] = normalMatrix(i, numFactors);
-	}
+	normalMatrix.GaussJordan(solution, numFactors);
 
 	if (reprap.Debug(moduleMove))
 	{
@@ -283,12 +274,11 @@ bool ZLeadscrewKinematics::DoAutoCalibration(size_t numFactors, const RandomProb
 		}
 	}
 
-	bool failed = false;
 	if (haveNaN)
 	{
 		reply.printf("Calibration failed, computed corrections:");
 		AppendCorrections(solution, reply);
-		failed = true;
+		return true;
 	}
 	else
 	{
@@ -299,7 +289,7 @@ bool ZLeadscrewKinematics::DoAutoCalibration(size_t numFactors, const RandomProb
 			{
 				reply.printf("Some computed corrections exceed configured limit of %.02fmm:", (double)maxCorrection);
 				AppendCorrections(solution, reply);
-				failed = true;
+				return true;
 			}
 			else
 			{
@@ -308,6 +298,7 @@ bool ZLeadscrewKinematics::DoAutoCalibration(size_t numFactors, const RandomProb
 				AppendCorrections(solution, reply);
 				reply.catf(", points used %d, deviation before %.3f after %.3f",
 							numPoints, (double)sqrtf((float)initialSumOfSquares/numPoints), (double)sqrtf((float)sumOfSquares/numPoints));
+				reprap.GetPlatform().MessageF(LogMessage, ";%s;\n", reply.Pointer());
 			}
 		}
 		else
@@ -321,9 +312,8 @@ bool ZLeadscrewKinematics::DoAutoCalibration(size_t numFactors, const RandomProb
 				reply.catf(" %.2f turn %s (%.2fmm)", (double)(fabsf(netAdjustment)/screwPitch), (netAdjustment > 0) ? "down" : "up", (double)netAdjustment);
 			}
 		}
+		return false;
 	}
-	reprap.GetPlatform().MessageF(LogMessage, "%s\n", reply.c_str());
-	return failed;
 }
 
 // Append the list of leadscrew corrections to 'reply'

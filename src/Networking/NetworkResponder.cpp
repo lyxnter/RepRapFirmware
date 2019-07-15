@@ -7,22 +7,51 @@
 
 #include "NetworkResponder.h"
 #include "Socket.h"
+
 #include "Platform.h"
+#include "OutputMemory.h"
+
+
+// NetworkResponderLock members
+
+// Acquire a lock
+bool NetworkResponderLock::Acquire(const NetworkResponder *who)
+{
+	if (owner == nullptr)
+	{
+		owner = who;
+		return true;
+	}
+	if (owner == who)
+	{
+		return true;
+	}
+	return false;
+}
+
+// Release a lock
+void NetworkResponderLock::Release(const NetworkResponder *who)
+{
+	if (owner == who)
+	{
+		owner = nullptr;
+	}
+}
 
 // NetworkResponder members
 
 NetworkResponder::NetworkResponder(NetworkResponder *n)
 	: next(n), responderState(ResponderState::free), skt(nullptr),
-	  outBuf(nullptr), fileBeingSent(nullptr), fileBuffer(nullptr)
+	  outBuf(nullptr), outStack(new OutputStack), fileBeingSent(nullptr), fileBuffer(nullptr)
 {
 }
 
 // Send the contents of the output buffers
-void NetworkResponder::Commit(ResponderState nextState, bool report)
+void NetworkResponder::Commit(ResponderState nextState)
 {
 	stateAfterSending = nextState;
 	responderState = ResponderState::sending;
-	if (report && reprap.Debug(moduleWebserver))
+	if (reprap.Debug(moduleWebserver))
 	{
 		debugPrintf("Sending reply, file = %s\n", (fileBeingSent != nullptr) ? "yes" : "no");
 	}
@@ -37,7 +66,7 @@ void NetworkResponder::SendData()
 	{
 		if (outBuf == nullptr)
 		{
-			outBuf = outStack.Pop();
+			outBuf = outStack->Pop();
 			if (outBuf == nullptr)
 			{
 				break;
@@ -125,10 +154,7 @@ void NetworkResponder::SendData()
 			}
 
 			fileBuffer->Taken(sent);
-
-			if (   sent < remaining				// if we couldn't send it all...
-				|| fileBuffer->IsEmpty()		// ...or if we've sent the whole buffer, return to allow other sockets to be polled
-			   )
+			if (sent < remaining)
 			{
 				return;
 			}
@@ -150,8 +176,10 @@ void NetworkResponder::SendData()
 // This is called when we lose a connection or when we are asked to terminate. Overridden in some derived classes.
 void NetworkResponder::ConnectionLost()
 {
+	CancelUpload();
 	OutputBuffer::ReleaseAll(outBuf);
-	outStack.ReleaseAll();
+	outBuf = nullptr;
+	outStack->ReleaseAll();
 
 	if (fileBeingSent != nullptr)
 	{
@@ -174,17 +202,72 @@ void NetworkResponder::ConnectionLost()
 	responderState = ResponderState::free;
 }
 
-IPAddress NetworkResponder::GetRemoteIP() const
+// Start writing to a new file
+void NetworkResponder::StartUpload(FileStore *file, const char *fileName)
 {
-	return (skt == nullptr) ? IPAddress() : skt->GetRemoteIP();
+	fileBeingUploaded.Set(file);
+	SafeStrncpy(filenameBeingUploaded, fileName, ARRAY_SIZE(filenameBeingUploaded));
+	responderState = ResponderState::uploading;
+	uploadError = false;
 }
 
-void NetworkResponder::ReportOutputBufferExhaustion(const char *sourceFile, int line)
+// If this responder has an upload in progress, cancel it
+void NetworkResponder::CancelUpload()
 {
-	if (reprap.Debug(moduleWebserver))
+	if (fileBeingUploaded.IsLive())
 	{
-		debugPrintf("Ran out of output buffers at %s(%d)\n", sourceFile, line);
+		fileBeingUploaded.Close();
+		if (filenameBeingUploaded[0] != 0)
+		{
+			GetPlatform().GetMassStorage()->Delete(FS_PREFIX, filenameBeingUploaded);
+		}
 	}
+}
+
+// Finish a file upload. Set variable uploadError if anything goes wrong.
+void NetworkResponder::FinishUpload(uint32_t fileLength, time_t fileLastModified)
+{
+	// Flush remaining data for FSO
+	if (!fileBeingUploaded.Flush())
+	{
+		uploadError = true;
+		GetPlatform().Message(ErrorMessage, "Could not flush remaining data while finishing upload!\n");
+	}
+
+	// Check the file length is as expected
+	if (fileLength != 0 && fileBeingUploaded.Length() != fileLength)
+	{
+		uploadError = true;
+		GetPlatform().MessageF(ErrorMessage, "Uploaded file size is different (%lu vs. expected %lu bytes)!\n", fileBeingUploaded.Length(), fileLength);
+	}
+
+	// Close the file
+	if (fileBeingUploaded.IsLive())
+	{
+		fileBeingUploaded.Close();
+	}
+
+	// Delete the file again if an error has occurred
+	if (filenameBeingUploaded[0] != 0)
+	{
+		if (uploadError)
+		{
+			GetPlatform().GetMassStorage()->Delete(FS_PREFIX, filenameBeingUploaded);
+		}
+		else if (fileLastModified != 0)
+		{
+			// Update the file timestamp if it was specified
+			(void)GetPlatform().GetMassStorage()->SetLastModifiedTime(nullptr, filenameBeingUploaded, fileLastModified);
+		}
+	}
+
+	// Clean up again
+	filenameBeingUploaded[0] = 0;
+}
+
+uint32_t NetworkResponder::GetRemoteIP() const
+{
+	return (skt == nullptr) ? 0 : skt->GetRemoteIP();
 }
 
 // End

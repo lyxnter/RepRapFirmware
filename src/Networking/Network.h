@@ -12,27 +12,18 @@
 #include "RepRapFirmware.h"
 #include "MessageType.h"
 #include "GCodes/GCodeResult.h"
-#include "RTOSIface/RTOSIface.h"
-#include "ObjectModel/ObjectModel.h"
 
-#if defined(DUET3_V03) || defined(SAME70XPLD)
+#if defined(SAME70_TEST_BOARD)
 const size_t NumNetworkInterfaces = 2;
-#elif defined(DUET3_V05) || defined(DUET_NG) || defined(DUET_M) || defined(__LPC17xx__)
+#elif defined(DUET_NG) || defined(DUET_M)
 const size_t NumNetworkInterfaces = 1;
 #else
 # error Wrong Network.h file included
 #endif
 
-#if defined(__LPC17xx__)
-// Only 2 http responders as we are tight on memory .
-const size_t NumHttpResponders = 2;		// the number of concurrent HTTP requests we can process
-const size_t NumFtpResponders = 0;		// the number of concurrent FTP sessions we support
-const size_t NumTelnetResponders = 0;	// the number of concurrent Telnet sessions we support
-#else
 const size_t NumHttpResponders = 4;		// the number of concurrent HTTP requests we can process
 const size_t NumFtpResponders = 1;		// the number of concurrent FTP sessions we support
 const size_t NumTelnetResponders = 2;	// the number of concurrent Telnet sessions we support
-#endif
 
 // Forward declarations
 class NetworkResponder;
@@ -42,7 +33,7 @@ class WiFiInterface;
 class WifiFirmwareUploader;
 
 // The main network class that drives the network.
-class Network INHERIT_OBJECT_MODEL
+class Network
 {
 public:
 	Network(Platform& p);
@@ -71,8 +62,7 @@ public:
 	GCodeResult GetNetworkState(unsigned int interface, const StringRef& reply);
 	int EnableState(unsigned int interface) const;
 
-	void SetEthernetIPAddress(IPAddress p_ipAddress, IPAddress p_netmask, IPAddress p_gateway);
-	IPAddress GetIPAddress(unsigned int interface) const;
+	void SetEthernetIPAddress(const uint8_t p_ipAddress[], const uint8_t p_netmask[], const uint8_t p_gateway[]);
 	const char *GetHostname() const { return hostname; }
 	void SetHostname(const char *name);
 	void SetMacAddress(unsigned int interface, const uint8_t mac[]);
@@ -86,28 +76,15 @@ public:
 	void HandleTelnetGCodeReply(OutputBuffer *buf);
 	uint32_t GetHttpReplySeq();
 
-#if SUPPORT_OBJECT_MODEL
-	NetworkInterface *GetInterface(size_t n) const { return interfaces[n]; }
-#endif
-
-protected:
-	DECLARE_OBJECT_MODEL
-
 private:
 	WiFiInterface *FindWiFiInterface() const;
 
 	Platform& platform;
+	uint32_t longWait;
 
 	NetworkInterface *interfaces[NumNetworkInterfaces];
 	NetworkResponder *responders;
 	NetworkResponder *nextResponderToPoll;
-
-	Mutex httpMutex;
-#if SUPPORT_TELNET
-	Mutex telnetMutex;
-#endif
-
-	uint32_t fastLoop, slowLoop;
 
 	char hostname[16];								// Limit DHCP hostname to 15 characters + terminating 0
 };

@@ -21,15 +21,12 @@ enum class TemperatureError : uint8_t
 	timeout,
 	ioError,
 	hardwareError,
-	notReady,
 	busBusy,
 	badResponse,
 	unknownChannel,
 	notInitialised,
 	unknownHeater,
-	overOrUnderVoltage,
-	badVref,
-	badVssa
+	overOrUnderVoltage
 };
 
 const char* TemperatureErrorString(TemperatureError err);

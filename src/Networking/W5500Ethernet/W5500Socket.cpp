@@ -7,7 +7,6 @@
 
 #include "W5500Socket.h"
 #include "Network.h"
-#include "NetworkInterface.h"
 #include "Wiznet/Ethernet/socketlib.h"
 #include "NetworkBuffer.h"
 #include "RepRap.h"
@@ -33,16 +32,12 @@ void W5500Socket::Init(SocketNumber skt, Port serverPort, NetworkProtocol p)
 
 void W5500Socket::TerminateAndDisable()
 {
-	MutexLocker lock(interface->interfaceMutex);
-
 	Terminate();
 	state = SocketState::disabled;
 }
 
 void W5500Socket::ReInit()
 {
-	MutexLocker lock(interface->interfaceMutex);
-
 	// Discard any received data
 	while (receivedData != nullptr)
 	{
@@ -61,8 +56,6 @@ void W5500Socket::ReInit()
 // Close a connection when the last packet has been sent
 void W5500Socket::Close()
 {
-	MutexLocker lock(interface->interfaceMutex);
-
 	if (state != SocketState::disabled && state != SocketState::inactive)
 	{
 		ExecCommand(socketNum, Sn_CR_DISCON);
@@ -78,8 +71,6 @@ void W5500Socket::Close()
 // Terminate a connection immediately
 void W5500Socket::Terminate()
 {
-	MutexLocker lock(interface->interfaceMutex);
-
 	if (state != SocketState::disabled)
 	{
 		disconnectNoWait(socketNum);
@@ -106,8 +97,6 @@ bool W5500Socket::ReadChar(char& c)
 {
 	if (receivedData != nullptr)
 	{
-		MutexLocker lock(interface->interfaceMutex);
-
 		const bool ret = receivedData->ReadChar(c);
 		if (receivedData->IsEmpty())
 		{
@@ -151,8 +140,6 @@ void W5500Socket::Poll(bool full)
 {
 	if (state != SocketState::disabled)
 	{
-		MutexLocker lock(interface->interfaceMutex);
-
 		switch(getSn_SR(socketNum))
 		{
 		case SOCK_INIT:
@@ -171,7 +158,7 @@ void W5500Socket::Poll(bool full)
 			if (getSn_IR(socketNum) & Sn_IR_CON)
 			{
 				// New connection, so retrieve the sending IP address and port, and clear the interrupt
-				getSn_DIPR(socketNum, remoteIPAddress);
+				getSn_DIPR(socketNum, reinterpret_cast<uint8_t*>(&remoteIPAddress));
 				remotePort = getSn_DPORT(socketNum);
 				setSn_IR(socketNum, Sn_IR_CON);
 				whenConnected = millis();
@@ -219,7 +206,7 @@ void W5500Socket::Poll(bool full)
 	}
 }
 
-// Try to receive more incoming data from the socket. The mutex is alrady owned.
+// Try to receive more incoming data from the socket
 void W5500Socket::ReceiveData()
 {
 	const uint16_t len = getSn_RX_RSR(socketNum);
@@ -258,7 +245,7 @@ void W5500Socket::ReceiveData()
 	}
 }
 
-// Discard any received data for this transaction. The mutex is already owned.
+// Discard any received data for this transaction
 void W5500Socket::DiscardReceivedData()
 {
 	while (receivedData != nullptr)
@@ -270,8 +257,6 @@ void W5500Socket::DiscardReceivedData()
 // Send the data, returning the length buffered
 size_t W5500Socket::Send(const uint8_t *data, size_t length)
 {
-	MutexLocker lock(interface->interfaceMutex);
-
 	if (CanSend() && length != 0 && getSn_SR(socketNum) == SOCK_ESTABLISHED)
 	{
 		// Check for previous send complete
@@ -326,8 +311,6 @@ size_t W5500Socket::Send(const uint8_t *data, size_t length)
 // Tell the interface to send the outstanding data
 void W5500Socket::Send()
 {
-	MutexLocker lock(interface->interfaceMutex);
-
 	if (CanSend() && sendOutstanding)
 	{
 		setSn_TX_WR(socketNum, wizTxBufferPtr);

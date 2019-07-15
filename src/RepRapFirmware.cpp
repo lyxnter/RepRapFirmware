@@ -165,11 +165,6 @@ Licence: GPL
 #include "Platform.h"
 #include "RepRap.h"
 
-#ifdef RTOS
-# include "FreeRTOS.h"
-# include "task.h"
-#endif
-
 // We just need one instance of RepRap; everything else is contained within it and hidden
 
 RepRap reprap;
@@ -191,119 +186,61 @@ const char * const moduleName[] =
 	"DuetExpansion",
 	"FilamentSensors",
 	"WiFi",
-	"Display",
 	"none"
 };
-
-// class MillisTimer members
-
-// Start or restart the timer
-void MillisTimer::Start()
-{
-	whenStarted = millis();
-	running = true;
-}
-
-// Check whether the timer is running and a timeout has expired, but don't stop it
-bool MillisTimer::Check(uint32_t timeoutMillis) const
-{
-	return running && millis() - whenStarted >= timeoutMillis;
-}
-
-// Check whether a timeout has expired and stop the timer if it has, else leave it running if it was running
-bool MillisTimer::CheckAndStop(uint32_t timeoutMillis)
-{
-	const bool ret = Check(timeoutMillis);
-	if (ret)
-	{
-		running = false;
-	}
-	return ret;
-}
 
 //*************************************************************************************************
 
 // Utilities and storage not part of any class
 
+static char scratchStringBuffer[220];		// this needs to be long enough to print delta parameters and 24 words of stack (217 bytes)
+StringRef scratchString(scratchStringBuffer, ARRAY_SIZE(scratchStringBuffer));
+
 // For debug use
 void debugPrintf(const char* fmt, ...)
 {
-	// Calls to debugPrintf() from with ISRs are unsafe, both because of timing issues and because the call to Platform::MessageF tries to acquire a mutex.
-	// So ignore the call if we are coming from within an ISR.
-	if (!inInterrupt())
-	{
-		va_list vargs;
-		va_start(vargs, fmt);
-		reprap.GetPlatform().MessageF(DebugMessage, fmt, vargs);
-		va_end(vargs);
-	}
+	va_list vargs;
+	va_start(vargs, fmt);
+	reprap.GetPlatform().MessageF(DebugMessage, fmt, vargs);
+	va_end(vargs);
 }
-
-#ifdef RTOS
-
-void delay(uint32_t ms)
-{
-	vTaskDelay(ms);
-}
-
-#endif
 
 // String testing
 
-bool StringEndsWithIgnoreCase(const char* string, const char* ending)
+bool StringEndsWith(const char* string, const char* ending)
 {
-	const size_t j = strlen(string);
-	const size_t k = strlen(ending);
-	return k <= j && StringEqualsIgnoreCase(&string[j - k], ending);
+	int j = strlen(string);
+	int k = strlen(ending);
+	return k <= j && StringEquals(&string[j - k], ending);
 }
 
-bool StringEqualsIgnoreCase(const char* s1, const char* s2)
+bool StringEquals(const char* s1, const char* s2)
 {
-	size_t i = 0;
-	while (s1[i] != 0 && s2[i] != 0)
+	int i = 0;
+	while(s1[i] && s2[i])
 	{
-		if (tolower(s1[i]) != tolower(s2[i]))
+		if(tolower(s1[i]) != tolower(s2[i]))
 		{
 			return false;
 		}
 		i++;
 	}
 
-	return s1[i] == 0 && s2[i] == 0;
+	return !(s1[i] || s2[i]);
 }
 
 bool StringStartsWith(const char* string, const char* starting)
 {
-	const size_t j = strlen(string);
-	const size_t k = strlen(starting);
+	int j = strlen(string);
+	int k = strlen(starting);
 	if (k > j)
 	{
 		return false;
 	}
 
-	for (size_t i = 0; i < k; i++)
+	for(int i = 0; i < k; i++)
 	{
 		if (string[i] != starting[i])
-		{
-			return false;
-		}
-	}
-
-	return true;
-}
-
-bool StringStartsWithIgnoreCase(const char* string, const char* starting)
-{
-	const size_t j = strlen(string);
-	const size_t k = strlen(starting);
-	if (k > j)
-	{
-		return false;
-	}
-
-	for (size_t i = 0; i < k; i++)
-	{
-		if (tolower(string[i]) != tolower(starting[i]))
 		{
 			return false;
 		}
@@ -317,14 +254,14 @@ int StringContains(const char* string, const char* match)
 	int i = 0;
 	int count = 0;
 
-	while (string[i] != 0)
+	while(string[i])
 	{
 		if (string[i++] == match[count])
 		{
 			count++;
-			if (match[count] == 0)
+			if (!match[count])
 			{
-				return i - count;
+				return i;
 			}
 		}
 		else
@@ -352,12 +289,6 @@ void SafeStrncat(char *dst, const char *src, size_t length)
 	dst[length - 1] = 0;
 }
 
-// Convert a float to double for passing to printf etc. If it is a NaN or infinity, convert it to 9999.9 to avoid getting JSON parse errors.
-double HideNan(float val)
-{
-	return (double)((std::isnan(val) || std::isinf(val)) ? 9999.9 : val);
-}
-
 // Append a list of driver numbers to a string, with a space before each one
 void ListDrivers(const StringRef& str, DriversBitmap drivers)
 {
@@ -365,20 +296,10 @@ void ListDrivers(const StringRef& str, DriversBitmap drivers)
 	{
 		if ((drivers & 1) != 0)
 		{
-			str.catf(" %u", d);
+			scratchString.catf(" %u", d);
 		}
 		drivers >>= 1;
 	}
-}
-
-// Convert a PWM that is possibly in the old style 0..255 to be in the range 0.0..1.0
-float ConvertOldStylePwm(float v)
-{
-	if (v > 1.0)
-	{
-		v = v/255.0;
-	}
-	return constrain<float>(v, 0.0, 1.0);
 }
 
 // End

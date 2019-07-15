@@ -19,7 +19,7 @@ void TmcDriverTemperatureSensor::Init()
 {
 }
 
-TemperatureError TmcDriverTemperatureSensor::TryGetTemperature(float& t)
+TemperatureError TmcDriverTemperatureSensor::GetTemperature(float& t)
 {
 	t = reprap.GetPlatform().GetTmcDriversTemperature(GetSensorChannel() - FirstTmcDriversSenseChannel);
 	return TemperatureError::success;

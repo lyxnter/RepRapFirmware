@@ -13,12 +13,24 @@
 #include "NetworkDefs.h"
 #include "Storage/FileData.h"
 #include "NetworkBuffer.h"
-#include "OutputMemory.h"
 
 // Forward declarations
 class NetworkResponder;
-class NetworkInterface;
 class Socket;
+
+// Class to implement a simple lock
+class NetworkResponderLock
+{
+public:
+	NetworkResponderLock() : owner(nullptr) { }
+
+	bool Acquire(const NetworkResponder *who);
+	void Release(const NetworkResponder *who);
+	bool IsOwnedBy(const NetworkResponder *who) const { return owner == who; }
+
+private:
+	const NetworkResponder *owner;
+};
 
 // Network responder base class
 class NetworkResponder
@@ -27,11 +39,11 @@ public:
 	NetworkResponder *GetNext() const { return next; }
 	virtual bool Spin() = 0;							// do some work, returning true if we did anything significant
 	virtual bool Accept(Socket *s, NetworkProtocol protocol) = 0;	// ask the responder to accept this connection, returns true if it did
-	virtual void Terminate(NetworkProtocol protocol, NetworkInterface *interface) = 0;	// terminate the responder if it is serving the specified protocol on the specified interface
+	virtual void Terminate(NetworkProtocol protocol) = 0;		// terminate the responder if it is serving the specified protocol
 	virtual void Diagnostics(MessageType mtype) const = 0;
 
 protected:
-	// State machine control. Not all derived classes use all states.
+	// States machine control. Not all derived classes use all states.
 	enum class ResponderState
 	{
 		free = 0,										// ready to be allocated
@@ -40,7 +52,7 @@ protected:
 		uploading,										// uploading a file to SD card
 
 		// HTTP responder additional states
-		processingRequest,
+		gettingFileInfoLock,							// waiting to get the file info lock
 		gettingFileInfo,								// getting file info
 
 		// FTP responder additional states
@@ -56,12 +68,15 @@ protected:
 
 	NetworkResponder(NetworkResponder *n);
 
-	void Commit(ResponderState nextState = ResponderState::free, bool report = true);
+	void Commit(ResponderState nextState = ResponderState::free);
 	virtual void SendData();
 	virtual void ConnectionLost();
 
-	IPAddress GetRemoteIP() const;
-	void ReportOutputBufferExhaustion(const char *sourceFile, int line);
+	void StartUpload(FileStore *file, const char *fileName);
+	void FinishUpload(uint32_t fileLength, time_t fileLastModified);
+	virtual void CancelUpload();
+
+	uint32_t GetRemoteIP() const;
 
 	static Platform& GetPlatform() { return reprap.GetPlatform(); }
 	static Network& GetNetwork() { return reprap.GetNetwork(); }
@@ -75,9 +90,16 @@ protected:
 
 	// Buffers for sending responses
 	OutputBuffer *outBuf;
-	OutputStack outStack;								// not volatile because only one task accesses it
+	OutputStack *outStack;
 	FileStore *fileBeingSent;
 	NetworkBuffer *fileBuffer;
+
+	// File uploads
+	FileData fileBeingUploaded;
+	char filenameBeingUploaded[MaxFilenameLength];
+	uint32_t postFileLength, uploadedBytes;				// How many POST bytes do we expect and how many have already been written?
+	time_t fileLastModified;
+	bool uploadError;
 };
 
 #endif /* SRC_NETWORKING_NETWORKRESPONDER_H_ */

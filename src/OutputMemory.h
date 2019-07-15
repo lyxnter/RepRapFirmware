@@ -27,7 +27,6 @@ class OutputBuffer
 		void Append(OutputBuffer *other);
 		OutputBuffer *Next() const { return next; }
 		bool IsReferenced() const { return isReferenced; }
-		bool HadOverflow() const { return hadOverflow; }
 		void IncreaseReferences(size_t refs);
 
 		const char *Data() const { return data; }
@@ -54,14 +53,9 @@ class OutputBuffer
 		size_t cat(const char *src, size_t len);
 		size_t cat(StringRef &str);
 
-		size_t EncodeString(const char *src, bool allowControlChars, bool prependAsterisk = false);
-
-		template<size_t Len> size_t EncodeString(const String<Len>& str, bool allowControlChars, bool prependAsterisk = false)
-		{
-			return EncodeString(str.c_str(), allowControlChars, prependAsterisk);
-		}
-
-		size_t EncodeReply(OutputBuffer *src);
+		size_t EncodeString(const char *src, size_t srcLength, bool allowControlChars, bool encapsulateString = true);
+		size_t EncodeString(const StringRef& str, bool allowControlChars, bool encapsulateString = true);
+		size_t EncodeReply(OutputBuffer *src, bool allowControlChars);
 
 		uint32_t GetAge() const;
 
@@ -85,14 +79,11 @@ class OutputBuffer
 		static OutputBuffer *Release(OutputBuffer *buf);
 
 		// Release all OutputBuffer objects in a chain
-		static void ReleaseAll(OutputBuffer * volatile &buf);
+		static void ReleaseAll(OutputBuffer *buf);
 
 		static void Diagnostics(MessageType mtype);
 
-		static unsigned int GetFreeBuffers() { return OUTPUT_BUFFER_COUNT - usedOutputBuffers; }
-
 	private:
-		size_t EncodeChar(char c);
 
 		OutputBuffer *next;
 		OutputBuffer *last;
@@ -103,10 +94,9 @@ class OutputBuffer
 		size_t dataLength, bytesRead;
 
 		bool isReferenced;
-		bool hadOverflow;
-		volatile size_t references;
+		size_t references;
 
-		static OutputBuffer * volatile freeOutputBuffers;		// Messages may be sent by multiple tasks
+		static OutputBuffer * volatile freeOutputBuffers;		// Messages may also be sent by ISRs,
 		static volatile size_t usedOutputBuffers;				// so make these volatile.
 		static volatile size_t maxUsedOutputBuffers;
 };
@@ -116,50 +106,49 @@ inline uint32_t OutputBuffer::GetAge() const
 	return millis() - whenQueued;
 }
 
-// This class is used to manage references to OutputBuffer chains for all output destinations.
-// Note that OutputStack objects should normally be declared volatile.
+// This class is used to manage references to OutputBuffer chains for all output destinations
 class OutputStack
 {
 	public:
 		OutputStack() : count(0) { }
 
 		// Is there anything on this stack?
-		bool IsEmpty() const volatile { return count == 0; }
+		bool IsEmpty() const { return count == 0; }
 
 		// Clear the reference list
-		void Clear() volatile { count = 0; }
+		void Clear() { count = 0; }
 
 		// Push an OutputBuffer chain
-		void Push(OutputBuffer *buffer) volatile;
+		void Push(OutputBuffer *buffer);
 
 		// Pop an OutputBuffer chain or return NULL if none is available
-		OutputBuffer *Pop() volatile;
+		OutputBuffer *Pop();
 
 		// Returns the first item from the stack or NULL if none is available
-		OutputBuffer *GetFirstItem() const volatile;
+		OutputBuffer *GetFirstItem() const;
 
 		// Set the first item of the stack. If it's NULL, then the first item will be removed
-		void SetFirstItem(OutputBuffer *buffer) volatile;
+		void SetFirstItem(OutputBuffer *buffer);
 
 		// Returns the last item from the stack or NULL if none is available
-		OutputBuffer *GetLastItem() const volatile;
+		OutputBuffer *GetLastItem() const;
 
 		// Get the total length of all queued buffers
-		size_t DataLength() const volatile;
+		size_t DataLength() const;
 
 		// Append another OutputStack to this instance. If no more space is available,
 		// all OutputBuffers that can't be added are automatically released
-		void Append(volatile OutputStack& stack) volatile;
+		void Append(OutputStack *stack);
 
 		// Increase the number of references for each OutputBuffer on the stack
-		void IncreaseReferences(size_t num) volatile;
+		void IncreaseReferences(size_t num);
 
 		// Release all buffers and clean up
-		void ReleaseAll() volatile;
+		void ReleaseAll();
 
 	private:
-		size_t count;
-		OutputBuffer * items[OUTPUT_STACK_DEPTH];
+		volatile size_t count;
+		OutputBuffer * volatile items[OUTPUT_STACK_DEPTH];
 };
 
 #endif /* OUTPUTMEMORY_H_ */

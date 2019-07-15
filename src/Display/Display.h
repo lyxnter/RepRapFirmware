@@ -8,10 +8,6 @@
 #ifndef SRC_DISPLAY_DISPLAY_H_
 #define SRC_DISPLAY_DISPLAY_H_
 
-#include "RepRapFirmware.h"
-
-#if SUPPORT_12864_LCD
-
 #include "RotaryEncoder.h"
 #include "ST7920/lcd7920.h"
 #include "Menu.h"
@@ -22,29 +18,22 @@ class Display
 public:
 	Display();
 
-	void Init() { }
+	void Init();
 	GCodeResult Configure(GCodeBuffer& gb, const StringRef& reply);
-	void Spin();
+	void Spin(bool full);
 	void Exit();
 	void Beep(unsigned int frequency, unsigned int milliseconds);
-	void SuccessBeep();
-	void ErrorBeep();
-	bool IsPresent() const { return lcd != nullptr; }
+	bool IsPresent() const { return present; }
 	void UpdatingFirmware();
 
 private:
-	Lcd7920 *lcd;
-	Menu *menu;
-	RotaryEncoder *encoder;
+	Lcd7920 lcd;
+	RotaryEncoder encoder;
+	Menu *mainMenu;
 	uint32_t whenBeepStarted;
 	uint32_t beepLength;
-	uint32_t lastRefreshMillis;
-	uint16_t mboxSeq;
-	bool mboxActive;
+	bool present;
 	bool beepActive;
-	bool updatingFirmware;
 };
-
-#endif
 
 #endif /* SRC_DISPLAY_DISPLAY_H_ */

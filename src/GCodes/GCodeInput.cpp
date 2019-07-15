@@ -21,16 +21,18 @@ bool GCodeInput::FillBuffer(GCodeBuffer *gb)
 		if (gb->IsWritingBinary())
 		{
 			// HTML uploads are handled by the GCodes class
-			gb->WriteBinaryToFile(c);
+			reprap.GetGCodes().WriteHTMLToFile(*gb, c);
 		}
 		else if (gb->Put(c))
 		{
-			if (gb->IsWritingFile())
+			// Check if we can finish a file upload
+			if (gb->WritingFileDirectory() != nullptr)
 			{
-				gb->WriteToFile();
+				reprap.GetGCodes().WriteGCodeToFile(*gb);
+				gb->SetFinished(true);
 			}
 
-			// Code is complete or has been written to file, so stop here
+			// Code is complete, stop here
 			return true;
 		}
 	}
@@ -58,10 +60,11 @@ size_t StreamGCodeInput::BytesCached() const
 	return device.available();
 }
 
+
 // Dynamic G-code input class for caching codes from software-defined sources
 
 RegularGCodeInput::RegularGCodeInput()
-	: state(GCodeInputState::idle), writingPointer(0), readingPointer(0)
+	: state(GCodeInputState::idle), buffer(reinterpret_cast<char * const>(buf32)), writingPointer(0), readingPointer(0)
 {
 }
 
@@ -91,12 +94,7 @@ size_t RegularGCodeInput::BytesCached() const
 	return GCodeInputBufferSize - readingPointer + writingPointer;
 }
 
-size_t RegularGCodeInput::BufferSpaceLeft() const
-{
-	return (readingPointer - writingPointer - 1u) % GCodeInputBufferSize;
-}
-
-void NetworkGCodeInput::Put(MessageType mtype, char c)
+void RegularGCodeInput::Put(MessageType mtype, const char c)
 {
 	if (BufferSpaceLeft() == 0)
 	{
@@ -114,7 +112,7 @@ void NetworkGCodeInput::Put(MessageType mtype, char c)
 				return;
 			}
 
-			state = (c == 'M' || c == 'm') ? GCodeInputState::doingMCode : GCodeInputState::doingCode;
+			state = (c == 'M') ? GCodeInputState::doingMCode : GCodeInputState::doingCode;
 			break;
 
 		case GCodeInputState::doingCode:
@@ -159,10 +157,8 @@ void NetworkGCodeInput::Put(MessageType mtype, char c)
 			if (c < ' ' || c == ';')
 			{
 				// Diagnostics requested - report them now
-				// Don't use the Network task itself to send them because this may result in deadlock if there is insufficient buffer space,
-				// because the Network task itself is used to send the output to the clients and free the buffers.
-				// Ask the main task to do it instead.
-				reprap.DeferredDiagnostics(mtype);
+				// Only send the report to the appropriate channel, because if we send it as a generic message instead then it gets truncated.
+				reprap.Diagnostics(mtype);
 
 				// But don't report them twice
 				Reset();
@@ -180,34 +176,30 @@ void NetworkGCodeInput::Put(MessageType mtype, char c)
 	}
 }
 
-void NetworkGCodeInput::Put(MessageType mtype, const char *buf)
+void RegularGCodeInput::Put(MessageType mtype, const char *buf)
 {
-	const size_t len = strlen(buf) + 1;
-	MutexLocker lock(bufMutex, 200);
-	if (lock)
+	Put(mtype, buf, strlen(buf) + 1);
+}
+
+void RegularGCodeInput::Put(MessageType mtype, const char *buf, size_t len)
+{
+	if (len > BufferSpaceLeft())
 	{
-		// Only cache this if we have enough space left
-		if (len <= BufferSpaceLeft())
-		{
-			for (size_t i = 0; i < len; i++)
-			{
-				Put(mtype, buf[i]);
-			}
-		}
+		// Don't cache this if we don't have enough space left
+		return;
+	}
+
+	for (size_t i = 0; i < len; i++)
+	{
+		Put(mtype, buf[i]);
 	}
 }
 
-NetworkGCodeInput::NetworkGCodeInput() : RegularGCodeInput()
+size_t RegularGCodeInput::BufferSpaceLeft() const
 {
-	bufMutex.Create("NetworkGCodeInput");
+	return (readingPointer - writingPointer - 1u) % GCodeInputBufferSize;
 }
 
-// Fill a GCodeBuffer with the last available G-code
-bool NetworkGCodeInput::FillBuffer(GCodeBuffer *gb) /*override*/
-{
-	MutexLocker lock(bufMutex, 10);
-	return lock && RegularGCodeInput::FillBuffer(gb);
-}
 
 // File-based G-code input source
 
@@ -228,7 +220,7 @@ void FileGCodeInput::Reset(const FileData &file)
 }
 
 // Read another chunk of G-codes from the file and return true if more data is available
-GCodeInputReadResult FileGCodeInput::ReadFromFile(FileData &file)
+bool FileGCodeInput::ReadFromFile(FileData &file)
 {
 	const size_t bytesCached = BytesCached();
 
@@ -255,22 +247,30 @@ GCodeInputReadResult FileGCodeInput::ReadFromFile(FileData &file)
 			readingPointer = writingPointer = 0;
 		}
 
-		// The code here used to read into a local buffer in blocks that are multiples of 4 bytes.
-		// However, unless we can use a buffer of at least 512 bytes then that is redundant,
-		// because the data will be copied via the sector buffer in FatFS anyway. So we don't do that any more.
-		const int bytesRead = file.Read(buffer + writingPointer, min<size_t>(BufferSpaceLeft(), GCodeInputBufferSize - writingPointer));
-		if (bytesRead < 0)
-		{
-			return GCodeInputReadResult::error;
-		}
+		// Read blocks with sizes multiple of 4 for HSMCI efficiency
+		uint32_t readBuffer32[(GCodeInputBufferSize + 3) / 4];
+		char * const readBuffer = reinterpret_cast<char * const>(readBuffer32);
+
+		int bytesRead = file.Read(readBuffer, BufferSpaceLeft() & (~3));
 		if (bytesRead > 0)
 		{
-			writingPointer = (writingPointer + (size_t)bytesRead) % GCodeInputBufferSize;
-			return GCodeInputReadResult::haveData;
+			int remaining = GCodeInputBufferSize - writingPointer;
+			if (bytesRead <= remaining)
+			{
+				memcpy(buffer + writingPointer, readBuffer, bytesRead);
+			}
+			else
+			{
+				memcpy(buffer + writingPointer, readBuffer, remaining);
+				memcpy(buffer, readBuffer + remaining, bytesRead - remaining);
+			}
+			writingPointer = (writingPointer + bytesRead) % GCodeInputBufferSize;
+
+			return true;
 		}
 	}
 
-	return (bytesCached > 0) ? GCodeInputReadResult::haveData : GCodeInputReadResult::noData;
+	return bytesCached > 0;
 }
 
 // End

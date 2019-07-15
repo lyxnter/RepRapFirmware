@@ -19,23 +19,12 @@
 #endif
 
 // Constructor
-TemperatureSensor::TemperatureSensor(unsigned int chan, const char *t) : sensorChannel(chan), sensorType(t), heaterName(nullptr), lastError(TemperatureError::success) {}
+TemperatureSensor::TemperatureSensor(unsigned int chan, const char *t) : sensorChannel(chan), sensorType(t), heaterName(nullptr) {}
 
 // Virtual destructor
 TemperatureSensor::~TemperatureSensor()
 {
 	delete heaterName;
-}
-
-// Try to get a temperature reading
-TemperatureError TemperatureSensor::GetTemperature(float& t)
-{
-	const TemperatureError rslt = TryGetTemperature(t);
-	if (rslt != TemperatureError::success)
-	{
-		lastError = rslt;
-	}
-	return rslt;
 }
 
 // Set the name - normally called only once, so we allow heap memory to be allocated
@@ -55,7 +44,7 @@ void TemperatureSensor::SetHeaterName(const char *newName)
 }
 
 // Default implementation of Configure, for sensors that have no configurable parameters
-GCodeResult TemperatureSensor::Configure(unsigned int mCode, unsigned int heater, GCodeBuffer& gb, const StringRef& reply)
+bool TemperatureSensor::Configure(unsigned int mCode, unsigned int heater, GCodeBuffer& gb, const StringRef& reply, bool& error)
 {
 	bool seen = false;
 	if (mCode == 305)
@@ -67,7 +56,7 @@ GCodeResult TemperatureSensor::Configure(unsigned int mCode, unsigned int heater
 			CopyBasicHeaterDetails(heater, reply);
 		}
 	}
-	return GCodeResult::ok;
+	return seen;
 }
 
 void TemperatureSensor::CopyBasicHeaterDetails(unsigned int heater, const StringRef& reply) const
@@ -77,7 +66,7 @@ void TemperatureSensor::CopyBasicHeaterDetails(unsigned int heater, const String
 	{
 		reply.catf(" (%s)", heaterName);
 	}
-	reply.catf(" uses %s sensor channel %u, last error: %s", sensorType, sensorChannel, TemperatureErrorString(lastError));
+	reply.catf(" uses %s sensor channel %u", sensorType, sensorChannel);
 }
 
 // Configure then heater name, if it is provided
@@ -97,13 +86,13 @@ void TemperatureSensor::TryConfigureHeaterName(GCodeBuffer& gb, bool& seen)
 TemperatureSensor *TemperatureSensor::Create(unsigned int channel)
 {
 	TemperatureSensor *ts = nullptr;
-	if (channel < NumThermistorInputs)
+	if (channel < Heaters)
 	{
 		ts = new Thermistor(channel, false);
 	}
-	else if (FirstPT1000Channel <= channel && channel < FirstPT1000Channel + NumThermistorInputs)
+	else if (FirstPT1000Channel <= channel && channel < FirstPT1000Channel + Heaters)
 	{
-		ts = new Thermistor(channel, true);
+		ts = new Thermistor(channel - FirstPT1000Channel, true);
 	}
 	else if (FirstMax31855ThermocoupleChannel <= channel && channel < FirstMax31855ThermocoupleChannel + MaxSpiTempSensors)
 	{
@@ -122,13 +111,9 @@ TemperatureSensor *TemperatureSensor::Create(unsigned int channel)
 		ts = new CurrentLoopTemperatureSensor(channel);
 	}
 #if SUPPORT_DHT_SENSOR
-	else if (FirstDhtTemperatureChannel <= channel && channel < FirstDhtTemperatureChannel + MaxSpiTempSensors)
+	else if (channel == DhtTemperatureChannel || channel == DhtHumidityChannel)
 	{
-		ts = new DhtTemperatureSensor(channel);
-	}
-	else if (FirstDhtHumidityChannel <= channel && channel < FirstDhtHumidityChannel + MaxSpiTempSensors)
-	{
-		ts = new DhtHumiditySensor(channel);
+		ts = new DhtSensor(channel);
 	}
 #endif
 #if HAS_CPU_TEMP_SENSOR
@@ -138,7 +123,7 @@ TemperatureSensor *TemperatureSensor::Create(unsigned int channel)
 	}
 #endif
 #if HAS_SMART_DRIVERS
-	else if (channel >= FirstTmcDriversSenseChannel && channel < FirstTmcDriversSenseChannel + NumTmcDriversSenseChannels)
+	else if (channel >= FirstTmcDriversSenseChannel && channel < FirstTmcDriversSenseChannel + 2)
 	{
 		ts = new TmcDriverTemperatureSensor(channel);
 	}

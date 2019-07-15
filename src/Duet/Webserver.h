@@ -273,7 +273,7 @@ protected:
 		char clientMessage[ftpMessageLength];
 		size_t clientPointer;
 
-		String<MaxFilenameLength> filename;
+		char filename[MaxFilenameLength];
 		char currentDir[MaxFilenameLength];
 
 		uint32_t portOpenTime;

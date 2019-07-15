@@ -17,21 +17,14 @@
 #include "PrintMonitor.h"
 
 // Static data
-Mutex FilamentMonitor::filamentSensorsMutex;
 FilamentMonitor *FilamentMonitor::filamentSensors[MaxExtruders] = { 0 };
 
 // Default destructor
 FilamentMonitor::~FilamentMonitor()
 {
-}
-
-// Call this to disable the interrupt before deleting or re-configuring a filament monitor
-void FilamentMonitor::Disable()
-{
 	if (pin != NoPin)
 	{
 		detachInterrupt(pin);
-		pin = NoPin;
 	}
 }
 
@@ -66,59 +59,6 @@ bool FilamentMonitor::ConfigurePin(GCodeBuffer& gb, const StringRef& reply, Inte
 		return true;
 	}
 	return false;
-}
-
-// Static initialisation
-/*static*/ void FilamentMonitor::InitStatic()
-{
-	filamentSensorsMutex.Create("FilamentSensors");
-}
-
-// Handle M591
-/*static*/ GCodeResult FilamentMonitor::Configure(GCodeBuffer& gb, const StringRef& reply, unsigned int extruder)
-{
-
-	bool seen = false;
-	long newSensorType;
-	gb.TryGetIValue('P', newSensorType, seen);
-
-	MutexLocker lock(filamentSensorsMutex);
-	FilamentMonitor*& sensor = filamentSensors[extruder];
-
-	if (seen)
-	{
-		// We are setting the filament monitor type, so see if it has changed
-		if (sensor != nullptr && newSensorType != sensor->GetType())
-		{
-			// We already have a sensor of a different type, so delete the old sensor
-			sensor->Disable();
-			delete sensor;
-			sensor = nullptr;
-		}
-
-		if (sensor == nullptr)
-		{
-			sensor = Create(extruder, newSensorType);					// create the new sensor type, if any
-		}
-	}
-
-	if (sensor != nullptr)
-	{
-		// Configure the sensor
-		const bool error = sensor->Configure(gb, reply, seen);
-		if (error)
-		{
-			sensor->Disable();
-			delete sensor;
-			sensor = nullptr;
-		}
-		return GetGCodeResultFromError(error);
-	}
-	else if (!seen)
-	{
-		reply.printf("Extruder %u has no filament sensor", extruder);
-	}
-	return GCodeResult::ok;
 }
 
 // Factory function
@@ -168,16 +108,13 @@ bool FilamentMonitor::ConfigurePin(GCodeBuffer& gb, const StringRef& reply, Inte
 	FilamentMonitor * const fm = static_cast<FilamentMonitor*>(param.vp);
 	if (fm->Interrupt())
 	{
-		fm->isrExtruderStepsCommanded = reprap.GetMove().GetAccumulatedExtrusion(fm->extruderNumber, fm->isrWasPrinting);
+		fm->isrExtruderStepsCommanded = reprap.GetMove().GetAccumulatedExtrusion(fm->extruderNumber, fm->isrWasNonPrinting);
 		fm->haveIsrStepsCommanded = true;
-		fm->isrMillis = millis();
 	}
 }
 
-/*static*/ void FilamentMonitor::Spin()
+/*static*/ void FilamentMonitor::Spin(bool full)
 {
-	MutexLocker lock(filamentSensorsMutex);
-
 	// Filament sensors
 	for (size_t extruder = 0; extruder < MaxExtruders; ++extruder)
 	{
@@ -185,16 +122,14 @@ bool FilamentMonitor::ConfigurePin(GCodeBuffer& gb, const StringRef& reply, Inte
 		{
 			FilamentMonitor& fs = *filamentSensors[extruder];
 			GCodes& gCodes = reprap.GetGCodes();
-			bool isPrinting;
+			bool wasNonPrinting;
 			bool fromIsr;
 			int32_t extruderStepsCommanded;
-			uint32_t isrMillis;
 			cpu_irq_disable();
 			if (fs.haveIsrStepsCommanded)
 			{
 				extruderStepsCommanded = fs.isrExtruderStepsCommanded;
-				isPrinting = fs.isrWasPrinting;
-				isrMillis = fs.isrMillis;
+				wasNonPrinting = fs.isrWasNonPrinting;
 				fs.haveIsrStepsCommanded = false;
 				cpu_irq_enable();
 				fromIsr = true;
@@ -202,15 +137,14 @@ bool FilamentMonitor::ConfigurePin(GCodeBuffer& gb, const StringRef& reply, Inte
 			else
 			{
 				cpu_irq_enable();
-				extruderStepsCommanded = reprap.GetMove().GetAccumulatedExtrusion(extruder, isPrinting);		// get and clear the net extrusion commanded
+				extruderStepsCommanded = reprap.GetMove().GetAccumulatedExtrusion(extruder, wasNonPrinting);		// get and clear the net extrusion commanded
 				fromIsr = false;
-				isrMillis = 0;
 			}
 			if (gCodes.IsReallyPrinting() && !gCodes.IsSimulating())
 			{
 				const float extrusionCommanded = (float)extruderStepsCommanded/reprap.GetPlatform().DriveStepsPerUnit(extruder + gCodes.GetTotalAxes());
-				const FilamentSensorStatus fstat = fs.Check(isPrinting, fromIsr, isrMillis, extrusionCommanded);
-				if (fstat != FilamentSensorStatus::ok)
+				const FilamentSensorStatus fstat = fs.Check(full, wasNonPrinting, fromIsr, extrusionCommanded);
+				if (full && fstat != FilamentSensorStatus::ok)
 				{
 					if (reprap.Debug(moduleFilamentSensors))
 					{
@@ -224,10 +158,34 @@ bool FilamentMonitor::ConfigurePin(GCodeBuffer& gb, const StringRef& reply, Inte
 			}
 			else
 			{
-				fs.Clear();
+				fs.Clear(full);
 			}
 		}
 	}
+}
+
+// Return the filament sensor associated with a particular extruder
+/*static*/ FilamentMonitor *FilamentMonitor::GetFilamentSensor(unsigned int extruder)
+{
+	return (extruder < MaxExtruders) ? filamentSensors[extruder] : nullptr;
+}
+
+// Set the filament sensor associated with a particular extruder
+/*static*/ bool FilamentMonitor::SetFilamentSensorType(unsigned int extruder, int newSensorType)
+{
+	if (extruder < MaxExtruders)
+	{
+		FilamentMonitor*& sensor = filamentSensors[extruder];
+		const int oldSensorType = (sensor == nullptr) ? 0 : sensor->GetType();
+		if (newSensorType != oldSensorType)
+		{
+			delete sensor;
+			sensor = Create(extruder, newSensorType);
+			return true;
+		}
+	}
+
+	return false;
 }
 
 // Send diagnostics info

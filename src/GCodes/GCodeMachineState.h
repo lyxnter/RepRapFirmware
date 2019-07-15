@@ -17,13 +17,10 @@ enum class GCodeState : uint8_t
 	normal,												// not doing anything and ready to process a new GCode
 
 	waitingForSpecialMoveToComplete,					// doing a special move, so we must wait for it to finish before processing another GCode
-	waitingForSegmentedMoveToGo,						// doing an arc move, so we must check whether it completes normally
+	waitingForArcMoveToComplete,						// doing an arc move, so we must check whether it completes normally
 
 	probingToolOffset,
-
-	findCenterOfCavityMin,
-	findCenterOfCavityR,
-	findCenterOfCavityMax,
+	probingServoOffset,
 
 	homing1,
 	homing2,
@@ -44,9 +41,6 @@ enum class GCodeState : uint8_t
 	pausing1,
 	pausing2,
 
-	filamentChangePause1,
-	filamentChangePause2,
-
 	resuming1,
 	resuming2,
 	resuming3,
@@ -54,28 +48,26 @@ enum class GCodeState : uint8_t
 	flashing1,
 	flashing2,
 
-	stoppingWithHeatersOff,
-	stoppingWithHeatersOn,
+	stopping,
+	sleeping,
 
-	// These next 9 must be contiguous
+	// These next 7 must be contiguous
 	gridProbing1,
 	gridProbing2a,
 	gridProbing2b,
 	gridProbing3,
 	gridProbing4,
-	gridProbing4a,
 	gridProbing5,
 	gridProbing6,
 	gridProbing7,
 
-	// These next 10 must be contiguous
+	// These next 9 must be contiguous
 	probingAtPoint0,
 	probingAtPoint1,
 	probingAtPoint2a,
 	probingAtPoint2b,
 	probingAtPoint3,
 	probingAtPoint4,
-	probingAtPoint4a,
 	probingAtPoint5,
 	probingAtPoint6,
 	probingAtPoint7,
@@ -84,8 +76,6 @@ enum class GCodeState : uint8_t
 	doingFirmwareUnRetraction,
 	loadingFilament,
 	unloadingFilament,
-
-	timingSDwrite,
 
 #if HAS_VOLTAGE_MONITOR
 	powerFailPausing1
@@ -100,7 +90,7 @@ public:
 	GCodeMachineState();
 
 	GCodeMachineState *previous;
-	float feedRate;
+	float feedrate;
 	FileData fileState;
 	ResourceBitmap lockedResources;
 	const char *errorMessage;
@@ -115,9 +105,8 @@ public:
 		runningM501 : 1,
 		runningM502 : 1,
 		volumetricExtrusion : 1,
-		g53Active : 1,							// true if seen G53 on this line of GCode
-		runningSystemMacro : 1,					// true if running a system macro file
-		usingInches : 1,						// true if units are inches not mm
+		useMachineCoordinates : 1,			// true if seen G53 on this line of GCode
+		useMachineCoordinatesSticky : 1,	// true if using machine coordinates for the remainder of this macro
 		// Caution: these next 3 will be modified out-of-process when we use RTOS, so they will need to be individual bool variables
 		waitingForAcknowledgement : 1,
 		messageAcknowledged : 1,
@@ -131,9 +120,7 @@ public:
 	{
 		drivesRelative = other.drivesRelative;
 		axesRelative = other.axesRelative;
-		feedRate = other.feedRate;
-		volumetricExtrusion = other.volumetricExtrusion;
-		usingInches = other.usingInches;
+		feedrate = other.feedrate;
 	}
 
 	static void Release(GCodeMachineState *ms);

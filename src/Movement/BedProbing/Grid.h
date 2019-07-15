@@ -8,11 +8,12 @@
 #ifndef SRC_MOVEMENT_GRID_H_
 #define SRC_MOVEMENT_GRID_H_
 
+#include <cstdint>
 #include "RepRapFirmware.h"
-#include "ObjectModel/ObjectModel.h"
+#include "Libraries/General/StringRef.h"
 
 // This class defines the bed probing grid
-class GridDefinition INHERIT_OBJECT_MODEL
+class GridDefinition
 {
 public:
 	friend class HeightMap;
@@ -35,9 +36,6 @@ public:
 
 	void PrintError(float originalXrange, float originalYrange, const StringRef& r) const
 	pre(!IsValid());
-
-protected:
-	DECLARE_OBJECT_MODEL
 
 private:
 	void CheckValidity();
@@ -70,7 +68,7 @@ public:
 	void ClearGridHeights();										// Clear all grid height corrections
 	void SetGridHeight(size_t xIndex, size_t yIndex, float height);	// Set the height of a grid point
 
-	bool SaveToFile(FileStore *f, float zOffset) const				// Save the grid to file returning true if an error occurred
+	bool SaveToFile(FileStore *f) const								// Save the grid to file returning true if an error occurred
 	pre(IsValid());
 
 	bool LoadFromFile(FileStore *f, const StringRef& r);			// Load the grid from file returning true if an error occurred
@@ -80,8 +78,8 @@ public:
 	bool UseHeightMap(bool b);
 	bool UsingHeightMap() const { return useMap; }
 
-	unsigned int GetStatistics(float& mean, float& deviation, float& minError, float& maxError) const;
-																	// Return number of points probed, mean and RMS deviation, min and max error
+	unsigned int GetStatistics(float& mean, float& deviation) const; // Return number of points probed, mean and RMS deviation
+
 	void ExtrapolateMissing();										// Extrapolate missing points to ensure consistency
 
 private:

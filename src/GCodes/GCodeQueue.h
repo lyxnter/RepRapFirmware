@@ -10,6 +10,8 @@
 #include "RepRapFirmware.h"
 #include "GCodeBuffer.h"
 
+const size_t maxQueuedCodes = 8;				// How many codes can be queued?
+
 class QueuedCode;
 
 class GCodeQueue
@@ -42,7 +44,7 @@ public:
 private:
 	QueuedCode *next;
 
-	char code[SHORT_GCODE_LENGTH];
+	char code[GCODE_LENGTH];
 	uint32_t executeAtMove;
 	int toolNumberAdjust;
 

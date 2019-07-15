@@ -1,9 +1,10 @@
-#include "RotaryEncoder.h"
+#include "RepRapFirmware.h"
+#include "Pins.h"
 
 #if SUPPORT_12864_LCD
 
-#include "Pins.h"
-#include "Hardware/IoPorts.h"
+#include "RotaryEncoder.h"
+#include "IoPorts.h"
 
 RotaryEncoder::RotaryEncoder(Pin p0, Pin p1, Pin pb)
 	: pin0(p0), pin1(p1), pinButton(pb), ppc(1), encoderChange(0), encoderState(0), newPress(false), reverseDirection(false) {}

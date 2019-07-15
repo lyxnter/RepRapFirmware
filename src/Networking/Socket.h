@@ -9,7 +9,6 @@
 #define SRC_NETWORKING_SOCKET_H_
 
 #include "NetworkDefs.h"
-#include "General/IPAddress.h"
 
 const uint32_t FindResponderTimeout = 2000;		// how long we wait for a responder to become available
 const uint32_t MaxAckTime = 4000;				// how long we wait for a connection to acknowledge the remaining data before it is closed
@@ -22,11 +21,11 @@ class NetworkInterface;
 class Socket
 {
 public:
-	Socket(NetworkInterface *iface) : interface(iface), localPort(0), remotePort(0), remoteIPAddress(), state(SocketState::disabled) { }
+	Socket(NetworkInterface *iface) : interface(iface), localPort(0), remotePort(0), remoteIPAddress(0), state(SocketState::disabled) { }
 	NetworkInterface *GetInterface() const { return interface; }
 
 	Port GetLocalPort() const { return localPort; }
-	IPAddress GetRemoteIP() const { return remoteIPAddress; }
+	uint32_t GetRemoteIP() const { return remoteIPAddress; }
 	Port GetRemotePort() const { return remotePort; }
 	NetworkProtocol GetProtocol() const { return protocol; }
 
@@ -57,7 +56,7 @@ protected:
 	NetworkInterface * const interface;
 	Port localPort, remotePort;							// The local and remote ports
 	NetworkProtocol protocol;							// What protocol this socket is for
-	IPAddress remoteIPAddress;							// The remote IP address
+	uint32_t remoteIPAddress;							// The remote IP address
 	SocketState state;
 };
 

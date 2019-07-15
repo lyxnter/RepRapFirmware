@@ -41,7 +41,7 @@ void Filament::Unload()
 
 void Filament::LoadAssignment()
 {
-	FileStore *file = reprap.GetPlatform().OpenSysFile(FilamentAssignmentFile, OpenMode::read);
+	FileStore *file = reprap.GetPlatform().OpenFile(SYS_DIR, FilamentAssignmentFile, OpenMode::read);
 	if (file == nullptr)
 	{
 		// May happen, but not critical
@@ -78,7 +78,7 @@ void Filament::LoadAssignment()
 
 /*static*/ void Filament::SaveAssignments()
 {
-	FileStore * const file = reprap.GetPlatform().OpenSysFile(FilamentAssignmentFile, OpenMode::write);
+	FileStore *file = reprap.GetPlatform().OpenFile(SYS_DIR, FilamentAssignmentFile, OpenMode::write);
 	if (file == nullptr)
 	{
 		// Should never happen
@@ -95,10 +95,10 @@ void Filament::LoadAssignment()
 		time_t timeNow = reprap.GetPlatform().GetDateTime();
 		const struct tm * const timeInfo = gmtime(&timeNow);
 		buf.catf(" generated at %04u-%02u-%02u %02u:%02u",
-						timeInfo->tm_year + 1900, timeInfo->tm_mon + 1, timeInfo->tm_mday, timeInfo->tm_hour, timeInfo->tm_min);
+						timeInfo->tm_year + 1900, timeInfo->tm_mon, timeInfo->tm_mday, timeInfo->tm_hour, timeInfo->tm_min);
 	}
 	buf.cat('\n');
-	file->Write(buf.c_str());
+	file->Write(buf.Pointer());
 
 	// Write column headers and one row for each loaded filament
 	file->Write("extruder,filament\n");
@@ -107,7 +107,7 @@ void Filament::LoadAssignment()
 		if (f->IsLoaded())
 		{
 			buf.printf("%d,%s\n", f->GetExtruder(), f->GetName());
-			file->Write(buf.c_str());
+			file->Write(buf.Pointer());
 		}
 	}
 
@@ -118,7 +118,7 @@ void Filament::LoadAssignment()
 {
 	for (Filament *f = filamentList; f != nullptr; f = f->next)
 	{
-		if (StringEqualsIgnoreCase(f->name, filamentName))
+		if (StringEquals(f->name, filamentName))
 		{
 			return true;
 		}

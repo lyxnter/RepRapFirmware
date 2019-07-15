@@ -23,12 +23,7 @@ void OutputBuffer::Append(OutputBuffer *other)
 	{
 		last->next = other;
 		last = other->last;
-		if (other->hadOverflow)
-		{
-			hadOverflow = true;
-		}
-
-		for (OutputBuffer *item = Next(); item != other; item = item->Next())
+		for(OutputBuffer *item = Next(); item != other; item = item->Next())
 		{
 			item->last = last;
 		}
@@ -39,8 +34,6 @@ void OutputBuffer::IncreaseReferences(size_t refs)
 {
 	if (refs > 0)
 	{
-		TaskCriticalSectionLocker lock;
-
 		for(OutputBuffer *item = this; item != nullptr; item = item->Next())
 		{
 			item->references += refs;
@@ -96,10 +89,10 @@ const char *OutputBuffer::Read(size_t len)
 
 size_t OutputBuffer::printf(const char *fmt, ...)
 {
-	char formatBuffer[FormatStringLength];
+	char formatBuffer[FORMAT_STRING_LENGTH];
 	va_list vargs;
 	va_start(vargs, fmt);
-	SafeVsnprintf(formatBuffer, ARRAY_SIZE(formatBuffer), fmt, vargs);
+	vsnprintf(formatBuffer, ARRAY_SIZE(formatBuffer), fmt, vargs);
 	va_end(vargs);
 
 	return copy(formatBuffer);
@@ -107,18 +100,18 @@ size_t OutputBuffer::printf(const char *fmt, ...)
 
 size_t OutputBuffer::vprintf(const char *fmt, va_list vargs)
 {
-	char formatBuffer[FormatStringLength];
-	SafeVsnprintf(formatBuffer, ARRAY_SIZE(formatBuffer), fmt, vargs);
+	char formatBuffer[FORMAT_STRING_LENGTH];
+	vsnprintf(formatBuffer, ARRAY_SIZE(formatBuffer), fmt, vargs);
 
 	return cat(formatBuffer);
 }
 
 size_t OutputBuffer::catf(const char *fmt, ...)
 {
-	char formatBuffer[FormatStringLength];
+	char formatBuffer[FORMAT_STRING_LENGTH];
 	va_list vargs;
 	va_start(vargs, fmt);
-	SafeVsnprintf(formatBuffer, ARRAY_SIZE(formatBuffer), fmt, vargs);
+	vsnprintf(formatBuffer, ARRAY_SIZE(formatBuffer), fmt, vargs);
 	va_end(vargs);
 
 	formatBuffer[ARRAY_UPB(formatBuffer)] = 0;
@@ -131,10 +124,11 @@ size_t OutputBuffer::copy(const char c)
 	if (next != nullptr)
 	{
 		ReleaseAll(next);
+		next = nullptr;
 		last = this;
 	}
 
-	// Set the data
+	// Set the date
 	data[0] = c;
 	dataLength = 1;
 	return 1;
@@ -151,6 +145,7 @@ size_t OutputBuffer::copy(const char *src, size_t len)
 	if (next != nullptr)
 	{
 		ReleaseAll(next);
+		next = nullptr;
 		last = this;
 	}
 
@@ -167,8 +162,7 @@ size_t OutputBuffer::cat(const char c)
 		OutputBuffer *nextBuffer;
 		if (!Allocate(nextBuffer))
 		{
-			// We cannot store any more data
-			hadOverflow = true;
+			// We cannot store any more data. Should never happen
 			return 0;
 		}
 		nextBuffer->references = references;
@@ -176,7 +170,7 @@ size_t OutputBuffer::cat(const char c)
 
 		// Link the new item to this list
 		last->next = nextBuffer;
-		for (OutputBuffer *item = this; item != nextBuffer; item = item->Next())
+		for(OutputBuffer *item = this; item != nextBuffer; item = item->Next())
 		{
 			item->last = nextBuffer;
 		}
@@ -206,7 +200,6 @@ size_t OutputBuffer::cat(const char *src, size_t len)
 			if (!Allocate(nextBuffer))
 			{
 				// We cannot store any more data, stop here
-				hadOverflow = true;
 				break;
 			}
 			nextBuffer->references = references;
@@ -227,81 +220,85 @@ size_t OutputBuffer::cat(const char *src, size_t len)
 
 size_t OutputBuffer::cat(StringRef &str)
 {
-	return cat(str.c_str(), str.strlen());
+	return cat(str.Pointer(), str.Length());
 }
 
-// Encode a character in JSON format, and append it to the buffer and return the number of bytes written
-size_t OutputBuffer::EncodeChar(char c)
+// Encode a string in JSON format and append it to a string buffer and return the number of bytes written
+size_t OutputBuffer::EncodeString(const char *src, size_t srcLength, bool allowControlChars, bool encapsulateString)
 {
-	char esc;
-	switch (c)
+	size_t bytesWritten = 0;
+	if (encapsulateString)
 	{
-	case '\r':
-		esc = 'r';
-		break;
-	case '\n':
-		esc = 'n';
-		break;
-	case '\t':
-		esc = 't';
-		break;
-	case '"':
-	case '\\':
-#if 1
-	// Escaping '/' is optional in JSON, although doing so so confuses PanelDue (fixed in PanelDue firmware version 1.15 and later). As it's optional, we don't do it.
-#else
-	case '/':
-#endif
-		esc = c;
-		break;
-	default:
-		esc = 0;
-		break;
+		bytesWritten += cat('"');
 	}
 
-	if (esc != 0)
+	if (srcLength != 0)
 	{
-		cat('\\');
-		cat(esc);
-		return 2;
-	}
-
-	cat(c);
-	return 1;
-}
-
-// Encode a string in JSON format and append it to the buffer and return the number of bytes written
-size_t OutputBuffer::EncodeString(const char *src, bool allowControlChars, bool prependAsterisk)
-{
-	size_t bytesWritten = cat('"');
-	if (prependAsterisk)
-	{
-		bytesWritten += cat('*');
-	}
-
-	if (src != nullptr)
-	{
-		char c;
-		while ((c = *src++) != 0 && (c >= ' ' || allowControlChars))
+		size_t srcPointer = 1;
+		char c = *src++;
+		while (srcPointer <= srcLength && c != 0 && (c >= ' ' || allowControlChars))
 		{
-			bytesWritten += EncodeChar(c);
+			char esc;
+			switch (c)
+			{
+			case '\r':
+				esc = 'r';
+				break;
+			case '\n':
+				esc = 'n';
+				break;
+			case '\t':
+				esc = 't';
+				break;
+			case '"':
+			case '\\':
+#if 1
+			// In theory we should escape '/' as well. However, we never used to, and doing so confuses PanelDue.
+			// This will be fixed in PanelDue firmware version 1.15, but in the mean time, don't escape '/'.
+#else
+			case '/':
+#endif
+				esc = c;
+				break;
+			default:
+				esc = 0;
+				break;
+			}
+
+			if (esc != 0)
+			{
+				bytesWritten += cat('\\');
+				bytesWritten += cat(esc);
+			}
+			else
+			{
+				bytesWritten += cat(c);
+			}
+
+			c = *src++;
+			srcPointer++;
 		}
 	}
 
-	bytesWritten += cat('"');
+	if (encapsulateString)
+	{
+		bytesWritten += cat('"');
+	}
 	return bytesWritten;
 }
 
-size_t OutputBuffer::EncodeReply(OutputBuffer *src)
+size_t OutputBuffer::EncodeString(const StringRef& str, bool allowControlChars, bool encapsulateString)
+{
+	return EncodeString(str.Pointer(), str.Length(), encapsulateString);
+}
+
+size_t OutputBuffer::EncodeReply(OutputBuffer *src, bool allowControlChars)
 {
 	size_t bytesWritten = cat('"');
 
 	while (src != nullptr)
 	{
-		for (size_t index = 0; index < src->DataLength(); ++index)
-		{
-			bytesWritten += EncodeChar(src->Data()[index]);
-		}
+		bytesWritten += EncodeString(src->Data(), src->DataLength(), allowControlChars, false);
 		src = Release(src);
 	}
 
@@ -345,42 +342,50 @@ bool OutputBuffer::WriteToFile(FileData& f) const
 	}
 }
 
-// Allocates an output buffer instance which can be used for (large) string outputs. This must be thread safe. Not safe to call from interrupts!
+// Allocates an output buffer instance which can be used for (large) string outputs
 /*static*/ bool OutputBuffer::Allocate(OutputBuffer *&buf)
 {
+	const irqflags_t flags = cpu_irq_save();
+
+	if (freeOutputBuffers == nullptr)
 	{
-		TaskCriticalSectionLocker lock;
+		reprap.GetPlatform().LogError(ErrorCode::OutputStarvation);
+		cpu_irq_restore(flags);
 
-		buf = freeOutputBuffers;
-		if (buf != nullptr)
-		{
-			freeOutputBuffers = buf->next;
-			usedOutputBuffers++;
-			if (usedOutputBuffers > maxUsedOutputBuffers)
-			{
-				maxUsedOutputBuffers = usedOutputBuffers;
-			}
-
-			// Initialise the buffer before we release the lock in case another task uses it immediately
-			buf->next = nullptr;
-			buf->last = buf;
-			buf->dataLength = buf->bytesRead = 0;
-			buf->references = 1;					// assume it's only used once by default
-			buf->isReferenced = false;
-			buf->hadOverflow = false;
-
-			return true;
-		}
+		buf = nullptr;
+		return false;
 	}
 
-	reprap.GetPlatform().LogError(ErrorCode::OutputStarvation);
-	return false;
+	buf = freeOutputBuffers;
+	freeOutputBuffers = buf->next;
+
+	usedOutputBuffers++;
+	if (usedOutputBuffers > maxUsedOutputBuffers)
+	{
+		maxUsedOutputBuffers = usedOutputBuffers;
+	}
+
+	buf->next = nullptr;
+	buf->last = buf;
+	buf->dataLength = buf->bytesRead = 0;
+	buf->references = 1; // Assume it's only used once by default
+	buf->isReferenced = false;
+
+	cpu_irq_restore(flags);
+	return true;
 }
 
 // Get the number of bytes left for continuous writing
 /*static*/ size_t OutputBuffer::GetBytesLeft(const OutputBuffer *writingBuffer)
 {
 	const size_t freeOutputBuffers = OUTPUT_BUFFER_COUNT - usedOutputBuffers;
+	if (writingBuffer == nullptr)
+	{
+		// Only return the total number of bytes left
+		return freeOutputBuffers * OUTPUT_BUFFER_SIZE;
+	}
+
+	// We're doing a possibly long response like a filelist
 	const size_t bytesLeft = OUTPUT_BUFFER_SIZE - writingBuffer->last->DataLength();
 
 	if (freeOutputBuffers < RESERVED_OUTPUT_BUFFERS)
@@ -392,8 +397,8 @@ bool OutputBuffer::WriteToFile(FileData& f) const
 	return bytesLeft + (freeOutputBuffers - RESERVED_OUTPUT_BUFFERS) * OUTPUT_BUFFER_SIZE;
 }
 
+
 // Truncate an output buffer to free up more memory. Returns the number of released bytes.
-// This never releases the first buffer in the chain, so call it with a large value of bytesNeeded to release all buffers except the first.
 /*static */ size_t OutputBuffer::Truncate(OutputBuffer *buffer, size_t bytesNeeded)
 {
 	// Can we free up space from this chain? Don't break it up if it's referenced anywhere else
@@ -423,7 +428,7 @@ bool OutputBuffer::WriteToFile(FileData& f) const
 	} while (previousItem != buffer && releasedBytes < bytesNeeded);
 
 	// Update all the references to the last item
-	for (OutputBuffer *item = buffer; item != nullptr; item = item->Next())
+	for(OutputBuffer *item = buffer; item != nullptr; item = item->Next())
 	{
 		item->last = previousItem;
 	}
@@ -433,7 +438,7 @@ bool OutputBuffer::WriteToFile(FileData& f) const
 // Releases an output buffer instance and returns the next entry from the chain
 /*static */ OutputBuffer *OutputBuffer::Release(OutputBuffer *buf)
 {
-	TaskCriticalSectionLocker lock;
+	const irqflags_t flags = cpu_irq_save();
 	OutputBuffer * const nextBuffer = buf->next;
 
 	// If this one is reused by another piece of code, don't free it up
@@ -441,18 +446,20 @@ bool OutputBuffer::WriteToFile(FileData& f) const
 	{
 		buf->references--;
 		buf->bytesRead = 0;
+		cpu_irq_restore(flags);
+		return nextBuffer;
 	}
-	else
-	{
-		// Otherwise prepend it to the list of free output buffers again
-		buf->next = freeOutputBuffers;
-		freeOutputBuffers = buf;
-		usedOutputBuffers--;
-	}
+
+	// Otherwise prepend it to the list of free output buffers again
+	buf->next = freeOutputBuffers;
+	freeOutputBuffers = buf;
+	usedOutputBuffers--;
+
+	cpu_irq_restore(flags);
 	return nextBuffer;
 }
 
-/*static */ void OutputBuffer::ReleaseAll(OutputBuffer * volatile &buf)
+/*static */ void OutputBuffer::ReleaseAll(OutputBuffer *buf)
 {
 	while (buf != nullptr)
 	{
@@ -470,115 +477,132 @@ bool OutputBuffer::WriteToFile(FileData& f) const
 // OutputStack class implementation
 
 // Push an OutputBuffer chain to the stack
-void OutputStack::Push(OutputBuffer *buffer) volatile
+void OutputStack::Push(OutputBuffer *buffer)
 {
-	if (buffer != nullptr)
+	if (count == OUTPUT_STACK_DEPTH)
 	{
-		{
-			TaskCriticalSectionLocker lock;
-
-			if (count < OUTPUT_STACK_DEPTH)
-			{
-				buffer->whenQueued = millis();
-				items[count++] = buffer;
-				return;
-			}
-		}
 		OutputBuffer::ReleaseAll(buffer);
 		reprap.GetPlatform().LogError(ErrorCode::OutputStackOverflow);
+		return;
+	}
+
+	if (buffer != nullptr)
+	{
+		buffer->whenQueued = millis();
+		const irqflags_t flags = cpu_irq_save();
+		items[count++] = buffer;
+		cpu_irq_restore(flags);
 	}
 }
 
-// Pop an OutputBuffer chain or return nullptr if none is available
-OutputBuffer *OutputStack::Pop() volatile
+// Pop an OutputBuffer chain or return NULL if none is available
+OutputBuffer *OutputStack::Pop()
 {
-	TaskCriticalSectionLocker lock;
-
 	if (count == 0)
 	{
 		return nullptr;
 	}
 
+	const irqflags_t flags = cpu_irq_save();
 	OutputBuffer *item = items[0];
-	for (size_t i = 1; i < count; i++)
+	for(size_t i = 1; i < count; i++)
 	{
 		items[i - 1] = items[i];
 	}
 	count--;
+	cpu_irq_restore(flags);
 
 	return item;
 }
 
-// Returns the first item from the stack or nullptr if none is available
-OutputBuffer *OutputStack::GetFirstItem() const volatile
+// Returns the first item from the stack or NULL if none is available
+OutputBuffer *OutputStack::GetFirstItem() const
 {
-	return (count == 0) ? nullptr : items[0];
+	if (count == 0)
+	{
+		return nullptr;
+	}
+	return items[0];
 }
 
-// Update the first item of the stack
-void OutputStack::SetFirstItem(OutputBuffer *buffer) volatile
+// Set the first item of the stack. If it's NULL, then the first item will be removed
+void OutputStack::SetFirstItem(OutputBuffer *buffer)
 {
+	const irqflags_t flags = cpu_irq_save();
 	if (buffer == nullptr)
 	{
-		(void)Pop();
+		// If buffer is NULL, then the first item is removed from the stack
+		for(size_t i = 1; i < count; i++)
+		{
+			items[i - 1] = items[i];
+		}
+		count--;
 	}
 	else
 	{
+		// Else only the first item is updated
 		items[0] = buffer;
 		buffer->whenQueued = millis();
 	}
+	cpu_irq_restore(flags);
 }
 
-// Returns the last item from the stack or nullptr if none is available
-OutputBuffer *OutputStack::GetLastItem() const volatile
+// Returns the last item from the stack or NULL if none is available
+OutputBuffer *OutputStack::GetLastItem() const
 {
-	return (count == 0) ? nullptr : items[count - 1];
+	if (count == 0)
+	{
+		return nullptr;
+	}
+	return items[count - 1];
 }
 
 // Get the total length of all queued buffers
-size_t OutputStack::DataLength() const volatile
+size_t OutputStack::DataLength() const
 {
 	size_t totalLength = 0;
 
-	TaskCriticalSectionLocker lock;
-	for (size_t i = 0; i < count; i++)
+	const irqflags_t flags = cpu_irq_save();
+	for(size_t i = 0; i < count; i++)
 	{
 		totalLength += items[i]->Length();
 	}
+	cpu_irq_restore(flags);
 
 	return totalLength;
 }
 
 // Append another OutputStack to this instance. If no more space is available,
 // all OutputBuffers that can't be added are automatically released
-void OutputStack::Append(volatile OutputStack& stack) volatile
+void OutputStack::Append(OutputStack *stack)
 {
-	for(size_t i = 0; i < stack.count; i++)
+	for(size_t i = 0; i < stack->count; i++)
 	{
 		if (count < OUTPUT_STACK_DEPTH)
 		{
-			items[count++] = stack.items[i];
+			items[count++] = stack->items[i];
 		}
 		else
 		{
 			reprap.GetPlatform().LogError(ErrorCode::OutputStackOverflow);
-			OutputBuffer::ReleaseAll(stack.items[i]);
+			OutputBuffer::ReleaseAll(stack->items[i]);
 		}
 	}
 }
 
 // Increase the number of references for each OutputBuffer on the stack
-void OutputStack::IncreaseReferences(size_t num) volatile
+void OutputStack::IncreaseReferences(size_t num)
 {
-	TaskCriticalSectionLocker lock;
+	const irqflags_t flags = cpu_irq_save();
 	for(size_t i = 0; i < count; i++)
 	{
 		items[i]->IncreaseReferences(num);
 	}
+	cpu_irq_restore(flags);
 }
 
 // Release all buffers and clean up
-void OutputStack::ReleaseAll() volatile
+void OutputStack::ReleaseAll()
 {
 	for(size_t i = 0; i < count; i++)
 	{

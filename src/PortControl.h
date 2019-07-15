@@ -9,11 +9,13 @@
 #define SRC_PORTCONTROL_H_
 
 #include "RepRapFirmware.h"
-#include "Hardware/IoPorts.h"			// for PinConfiguration
+#include "IoPorts.h"			// for PinConfiguration
 
 class GCodeBuffer;
 
 #if SUPPORT_IOBITS
+
+typedef uint16_t IoBits_t;
 
 class PortControl
 {

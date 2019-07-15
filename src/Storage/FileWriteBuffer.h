@@ -13,9 +13,6 @@
 #if SAM4E || SAM4S || SAME70
 const size_t NumFileWriteBuffers = 2;					// Number of write buffers
 const size_t FileWriteBufLen = 8192;					// Size of each write buffer
-#elif __LPC17xx__
-const size_t NumFileWriteBuffers = 1;
-const size_t FileWriteBufLen = 2*256; //4096; save some memory on LPC for networking
 #else
 const size_t NumFileWriteBuffers = 1;
 const size_t FileWriteBufLen = 4096;
@@ -38,8 +35,7 @@ public:
 	const size_t BytesLeft() const { return FileWriteBufLen - index; }
 
 	size_t Store(const char *data, size_t length);			// Stores some data and returns how much could be stored
-	void DataTaken() { index = 0; }							// Called to indicate that the buffer has been written to the SD card
-	void DataStored(size_t numBytes) { index += numBytes; }	// Called when more data has been stored directly in the buffer
+	void DataTaken() { index = 0; }							// Called to indicate that the buffer has been written
 
 private:
 	FileWriteBuffer *next;

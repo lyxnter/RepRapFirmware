@@ -42,7 +42,7 @@ RtdSensor31865::RtdSensor31865(unsigned int channel)
 }
 
 // Configure this temperature sensor
-GCodeResult RtdSensor31865::Configure(unsigned int mCode, unsigned int heater, GCodeBuffer& gb, const StringRef& reply)
+bool RtdSensor31865::Configure(unsigned int mCode, unsigned int heater, GCodeBuffer& gb, const StringRef& reply, bool& error)
 {
 	if (mCode == 305)
 	{
@@ -86,7 +86,7 @@ GCodeResult RtdSensor31865::Configure(unsigned int mCode, unsigned int heater, G
 			reply.catf(", %s wires, reject %dHz, reference resistor %u ohms", (cr0 & 0x10) ? "3" : "2/4", (cr0 & 0x01) ? 50 : 60, (unsigned int)rref);
 		}
 	}
-	return GCodeResult::ok;
+	return false;
 }
 
 // Perform the actual hardware initialization for attaching and using this device on the SPI hardware bus.
@@ -137,7 +137,7 @@ TemperatureError RtdSensor31865::TryInitRtd() const
 	return sts;
 }
 
-TemperatureError RtdSensor31865::TryGetTemperature(float& t)
+TemperatureError RtdSensor31865::GetTemperature(float& t)
 {
 	if (inInterrupt() || millis() - lastReadingTime < MinimumReadInterval)
 	{
