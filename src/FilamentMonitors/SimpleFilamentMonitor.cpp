@@ -11,7 +11,7 @@
 #include "GCodes/GCodeBuffer.h"
 
 SimpleFilamentMonitor::SimpleFilamentMonitor(unsigned int extruder, int type)
-	: FilamentMonitor(extruder, type), highWhenNoFilament(type == 2), filamentPresent(false), enabled(false)
+: FilamentMonitor(extruder, type), highWhenNoFilament(type == 2), filamentPresent(false), enabled(false)
 {
 }
 
@@ -31,15 +31,15 @@ bool SimpleFilamentMonitor::Configure(GCodeBuffer& gb, const StringRef& reply, b
 
 	if (seen)
 	{
-		Check(false, false, 0, 0.0);
+		this->Check(false, false, 0, 0.0);
 	}
 	else
 	{
 		reply.printf("Simple filament sensor on endstop %d, %s, output %s when no filament, filament present: %s",
-						GetEndstopNumber(),
-						(enabled) ? "enabled" : "disabled",
+				GetEndstopNumber(),
+				(enabled) ? "enabled" : "disabled",
 						(highWhenNoFilament) ? "high" : "low",
-						(filamentPresent) ? "yes" : "no");
+								(filamentPresent) ? "yes" : "no");
 	}
 
 	return false;
@@ -61,52 +61,48 @@ void SimpleFilamentMonitor::Poll()
 }
 
 // Call the following at intervals to check the status. This is only called when extrusion is in progress or imminent.
-// 'filamentConsumed' is the net amount of extrusion since the last call to this function.
+// 'filamentConsumed' is the net amount of extrusion since the last call to this function. || 60 mm
 FilamentSensorStatus SimpleFilamentMonitor::Check(bool isPrinting, bool fromIsr, uint32_t isrMillis, float filamentConsumed)
 {
 	Poll();
-	if (filamentPresent)
-		{
-			noFilament = 0;
-			prev = millis();
-			now = millis();
-		} else {
-			noFilament++;
-			now = millis();
-		}
-		return (!enabled || ((noFilament < 5) || (now < prev+1000))) ? FilamentSensorStatus::ok : FilamentSensorStatus::noFilament;
-}
-
-// Clear the measurement state - called when we are not printing a file. Return the present/not present status if available.
-FilamentSensorStatus SimpleFilamentMonitor::Clear()
-{
-	Poll();
-	if (filamentPresent)
-		{
-			noFilament = 0;
-			prev = millis();
-			now = millis();
-		} else {
-			noFilament++;
-			now = millis();
-		}
-		return (!enabled || ((noFilament < 5) || (now < prev+1000))) ? FilamentSensorStatus::ok : FilamentSensorStatus::noFilament;
-}
-
-// Print diagnostic info for this sensor
-void SimpleFilamentMonitor::Diagnostics(MessageType mtype, unsigned int extruder)
-{
-	noFilament = (filamentPresent?noFilament+1:0);
 	if (filamentPresent)
 	{
 		noFilament = 0;
 		prev = millis();
 		now = millis();
 	} else {
-		noFilament++;
+		noFilament += filamentConsumed;
 		now = millis();
 	}
-	reprap.GetPlatform().MessageF(mtype, "Extruder %u sensor: %s\n", extruder, ((noFilament < 5) || (now < prev+1000)) ? "ok" : "no filament");
+	return (!enabled || filamentPresent || (noFilament < 60) || (now < prev+5000)) ? FilamentSensorStatus::ok : FilamentSensorStatus::noFilament;
+}
+
+// Clear the measurement state - called when we are not printing a file. Return the present/not present status if available.
+FilamentSensorStatus SimpleFilamentMonitor::Clear()
+{
+	Poll();
+	noFilament = 0;
+	prev = millis();
+	now = millis();
+	return (filamentPresent) ? FilamentSensorStatus::ok : FilamentSensorStatus::noFilament;
+}
+
+// Print diagnostic info for this sensor
+void SimpleFilamentMonitor::Diagnostics(MessageType mtype, unsigned int extruder)
+{
+	Poll();
+	if (filamentPresent)
+	{
+		prev = millis();
+		now = millis();
+	} else {
+		now = millis();
+	}
+	reprap.GetPlatform().MessageF(mtype, "Extruder %u sensor: %s\n", extruder, (filamentPresent || (noFilament < 60) || (now < prev+5000)) ? "ok" : "no filament");
+	if ( now > prev+5000 )
+		reprap.GetPlatform().MessageF(mtype,"No filament detected after %ld seconds\r\n",  (now-prev)/1000);
+	if ( noFilament > 60 )
+		reprap.GetPlatform().MessageF(mtype,"No filament detected after extruding %f mm\r\n",  (double)noFilament );
 }
 
 // End

@@ -120,8 +120,8 @@ public :
 	void Spin(); 															// Routine générale
 	char * GetLastLog();													// Retourne le dernier ID des logs pour en créer un nouveau
 	void LynxDataLogs();													// Sauvegarde des logs
-	void LynxM968(); 														// Communication avec le panel due
-	void LynxM969(); 														// Communication avec le panel due
+	void LynxM968(MessageType mtype = MessageType::UsbMessage); 														// Communication avec le panel due
+	void LynxM969(MessageType mtype = MessageType::UsbMessage); 														// Communication avec le panel due
 	void SetTempSafeLed();													// Triggers a LED when a device temperature is >50°C
 	void LynxModCom(unsigned long valeur_amb, char valeur_ver, char delay);	// Communique avec l'arduino
 	void SetSafeHeatedChamberFan();											// Control heated chamber fan PWM to avoid fan and structure overheating

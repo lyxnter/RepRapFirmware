@@ -4404,11 +4404,11 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 					lynxMod.ComP = pval;
 				}
 				lynxMod.ComDate = millis();
-				lynxMod.LynxM968();
+				lynxMod.LynxM968(MessageType::HttpMessage);
 			}
 			break;
 		case 969: // Communication with LynxMod:lights
-			//reprap.GetPlatform().MessageF(MessageType::HttpMessage, " M969 Recu\n");
+			//reprap.GetPlatform().MessageF(, " M969 Recu\n");
 			if (gb.Seen('S')) { // Param\E8tre S
 				unsigned int val = gb.GetFValue();
 				lynxMod.ComP = -1;
@@ -4446,7 +4446,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 				lynxMod.ComC = 969;
 				lynxMod.Com = val;
 				lynxMod.ComDate = millis();
-				lynxMod.LynxM969();
+				lynxMod.LynxM969(MessageType::HttpMessage);
 			}
 			break;
 #endif

@@ -127,7 +127,7 @@ struct LynxMOD {
 		else if (this->opening_flag == 1) {
 			this->V_VER = Blink(50, 1000); //BLOQUE
 			if(!this->state_locked){
-				//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "door state LOCKED");
+				//reprap.GetPlatform().MessageF(mtype, "door state LOCKED");
 				this->state_locked = true;
 			}
 		}
@@ -139,7 +139,7 @@ struct LynxMOD {
 			else {
 				this->V_VER = Blink(50, 1000); //BLOQUE
 				if (!this->state_locked){
-					//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "door state LOCKED");
+					//reprap.GetPlatform().MessageF(mtype, "door state LOCKED");
 					this->state_locked = true;
 				}
 			}
@@ -153,7 +153,7 @@ struct LynxMOD {
 			this->V_VER = Blink(50, 1000); //FILTRAGE
 			if(!this->state_locked){
 				this->state_locked = true;
-				//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "door state LOCKED");
+				//reprap.GetPlatform().MessageF(mtype, "door state LOCKED");
 			}
 		}
 		else if (this->new_color) {
@@ -163,12 +163,12 @@ struct LynxMOD {
 			// Le bouton ne s'allume pas
 			this->V_VER = BP_OFF;
 			if(this->state_locked){
-				//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "door state UNLOCKED");
+				//reprap.GetPlatform().MessageF(mtype, "door state UNLOCKED");
 				this->state_locked = false;
 			}
 		}
 
-		//reprap.GetPlatform().MessageF(MessageType::HttpMessage, ";%d: %d;\n",this->new_color, this->trame_col);
+		//reprap.GetPlatform().MessageF(mtype, ";%d: %d;\n",this->new_color, this->trame_col);
 		// ON REGARDE L'AMBIANCE
 		if (this->flash) {
 			if (this->porte_ouverte){
@@ -186,7 +186,7 @@ struct LynxMOD {
 			this->delay = FAST;
 		}
 		else if (this->new_color) {
-			//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "LEDs manu color");
+			//reprap.GetPlatform().MessageF(mtype, "LEDs manu color");
 			this->V_AMB = this->trame_col;
 			this->delay = USER_SLOW;
 		}
@@ -206,7 +206,7 @@ struct LynxMOD {
 		else if (Lynxmod->EnableFaults &&  this->heater_fault) {
 			// Erreur critique (pour l'instant que temperature, à voir si il y a autre chose)
 			if (Heat::HS_fault != 0) {
-				//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "cc fault\n");
+				//reprap.GetPlatform().MessageF(mtype, "cc fault\n");
 			}
 			if (this->porte_ouverte)
 				this->V_AMB = listAmbiances[11].color;// MAJOR_ERROR_DO
@@ -450,9 +450,9 @@ struct Emission {
 				{
 					if (memoire <= 5)
 					{
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "SPI transmission error :\nBus busy\n trying %d more times\n", (5-memoire));
+						reprap.GetPlatform().MessageF(MessageType::UsbMessage, "SPI transmission error :\nBus busy\n trying %d more times\n", (5-memoire));
 					} else {
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "SPI transmission error :\nBus busy\n trying in %ds\n", delayErr);
+						reprap.GetPlatform().MessageF(MessageType::UsbMessage, "SPI transmission error :\nBus busy\n trying in %ds\n", delayErr);
 					}
 					memoire++;
 					//return TemperatureError::busBusy;
@@ -474,9 +474,9 @@ struct Emission {
 			{
 				if (memoire <= 5)
 				{
-					reprap.GetPlatform().MessageF(MessageType::HttpMessage, "SPI transmission error :\nData not received\n trying %d more times\n", (5-memoire));
+					reprap.GetPlatform().MessageF(MessageType::UsbMessage, "SPI transmission error :\nData not received\n trying %d more times\n", (5-memoire));
 				} else {
-					reprap.GetPlatform().MessageF(MessageType::HttpMessage, "SPI transmission error :\nData not received\n trying in %ds\n", delayErr);
+					reprap.GetPlatform().MessageF(MessageType::UsbMessage, "SPI transmission error :\nData not received\n trying in %ds\n", delayErr);
 					nb_err = millis();
 				}
 				memoire++;
@@ -497,7 +497,7 @@ struct Emission {
 		this->Valeur_ver = valeur_ver;
 		this->data_ver = valeur_ver;
 		this->delay = delay;
-		//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "New data %d\n", this->data);
+		//reprap.GetPlatform().MessageF(mtype, "New data %d\n", this->data);
 	}
 
 	void Conversion (unsigned int valeur) {
@@ -603,7 +603,7 @@ void LynxMod::Spin() {
 		} else
 			if (!Modlynx.porte_ouverte && (filtration_fan_pwm >= 0) && didOpen){
 				reprap.GetPlatform().MessageF(MessageType::UsbMessage, "Door closed: Filtration fan set to %.2f%%\n", (double)(filtration_fan_pwm*100.0));
-				//MessageF(MessageType::HttpMessage, "Door closed: Door fan set to %.2f%%\n", door_fan_pwm*100.0);
+				//MessageF(mtype, "Door closed: Door fan set to %.2f%%\n", door_fan_pwm*100.0);
 				reprap.GetPlatform().SetFanValue(filtrationFan, filtration_fan_pwm);
 				reprap.GetPlatform().fans[doorFan].SetHeatersMonitored(door_fan_heaters);
 				filtration_fan_pwm = -1.0;
@@ -780,20 +780,12 @@ void LynxMod::Lock(bool cmd) {
 		reprap.GetPlatform().SetFanValue(doorFan, 0.0);
 		didOpen = false;
 	}
-	/*if (!IoPort::ReadPin(DOOR_CMD)){
-		reprap.GetPlatform().MessageF(MessageType::UsbMessage, "Lock is open\n");
-	} else {
-		reprap.GetPlatform().MessageF(MessageType::UsbMessage, "Lock is closed\n");
-	}*/
 	IoPort::WriteAnalog(DOOR_CMD, (cmd ? 255 : 0), 0);
 }
 
 /* Gère l'ouverture de la porte */
 void LynxMod::Verrouillage() {
 	Modlynx.door_bp_pressed = !digitalRead(INPUT_DOOR_BP); // BP_DOOR
-	/*if (Modlynx.door_bp_pressed){
-		reprap.GetPlatform().MessageF(MessageType::UsbMessage, "BP_DOOR is pressed\n");
-	}*/
 	char ch = reprap.GetStatusCharacter();// Status de la machine
 
 	////////////////////////////////////////////////// FERMETURE //////////////////////////////////////////////////////////
@@ -825,7 +817,7 @@ void LynxMod::Verrouillage() {
 	}
 	if (egg_state == 15) {
 		egg_state = 0;
-		reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Reset egg\n");
+		//reprap.GetPlatform().MessageF(mtype, "Reset egg\n");
 	}
 
 	if (Modlynx.IS_PAUSED) { // Si on a ouvert la porte
@@ -919,7 +911,7 @@ void LynxMod::Verrouillage() {
 			egg_memoire = ComP;
 			egg_state = 0;
 			egg_cpt = 0;
-			//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Auto ComP\n");
+			//reprap.GetPlatform().MessageF(mtype, "Auto ComP\n");
 		}
 
 		// SI ON RELACHE LE BOUTON
@@ -1148,16 +1140,16 @@ int LynxMod::GetLEDs() {
 	}
 }
 
-void LynxMod::LynxM968(){
+void LynxMod::LynxM968(MessageType mtype){
 	bool err = false;
 	if (ComC == 968)
 	{
-		//reprap.GetPlatform().MessageF(MessageType::HttpMessage, " M968 Trait&eacute;\n");
+		//reprap.GetPlatform().MessageF(mtype, " M968 Trait&eacute;\n");
 		switch (Com){
 		case 0:
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S1: Ask for door to be open\n");
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S2: &empty; Report door safety sate\n\tP[1/0] ;Enable/Disable door safeties\n");
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S3: &empty; Reports error reporting state\n\tP[1/0] ;Enable/Disable LED display Error states\n");
+			reprap.GetPlatform().MessageF(mtype, "S1: Ask for door to be open\n");
+			reprap.GetPlatform().MessageF(mtype, "S2: &empty; Report door safety sate\n\tP[1/0] ;Enable/Disable door safeties\n");
+			reprap.GetPlatform().MessageF(mtype, "S3: &empty; Reports error reporting state\n\tP[1/0] ;Enable/Disable LED display Error states\n");
 			break;
 		case 1:
 			// On demande d'ouvrir la porte
@@ -1181,24 +1173,24 @@ void LynxMod::LynxM968(){
 			break;
 		case 2:
 			if (ComP < 0) {
-				reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Safeties are %s\n", (EnableSafeties?"enabled":"disabled"));
+				reprap.GetPlatform().MessageF(mtype, "Safeties are %s\n", (EnableSafeties?"enabled":"disabled"));
 			} else {
 				this->EnableSafeties = !!ComP;
-				reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Safeties are now %s\n", (EnableSafeties?"<span style='background:green;border-radius:4px;padding:1px 3px;'>ENABLED</span>":"<span style='background:red;border-radius:4px;padding:1px 3px;'>DISABLED</span>"));
+				reprap.GetPlatform().MessageF(mtype, "Safeties are now %s\n", (EnableSafeties?"<span style='background:green;border-radius:4px;padding:1px 3px;'>ENABLED</span>":"<span style='background:red;border-radius:4px;padding:1px 3px;'>DISABLED</span>"));
 			}
 			break;
 		case 3:
 			if (ComP < 0) {
-				reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Faults are %s\n", (this->EnableFaults?"enabled":"disabled"));
+				reprap.GetPlatform().MessageF(mtype, "Faults are %s\n", (this->EnableFaults?"enabled":"disabled"));
 			} else {
 				this->EnableFaults = !!ComP;
-				reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Faults are now %s\n", (EnableFaults?"enabled":"disabled"));
+				reprap.GetPlatform().MessageF(mtype, "Faults are now %s\n", (EnableFaults?"enabled":"disabled"));
 			}
 			break;
 		default :
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S1: Ask for door to be open\n");
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S2: &empty; Report door safety sate\n\tP[1/0] ;Enable/Disable door safeties\n");
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S3: &empty; Reports error reporting state\n\tP[1/0] ;Enable/Disable LED display Error states\n");
+			reprap.GetPlatform().MessageF(mtype, "S1: Ask for door to be open\n");
+			reprap.GetPlatform().MessageF(mtype, "S2: &empty; Report door safety sate\n\tP[1/0] ;Enable/Disable door safeties\n");
+			reprap.GetPlatform().MessageF(mtype, "S3: &empty; Reports error reporting state\n\tP[1/0] ;Enable/Disable LED display Error states\n");
 			break;
 		}
 		this->ex_Com = this->Com;
@@ -1207,11 +1199,11 @@ void LynxMod::LynxM968(){
 		this->Com = -1;
 	}
 	if (err) {
-		reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S value incorrect\n");
+		reprap.GetPlatform().MessageF(mtype, "S value incorrect\n");
 	}
 }
 
-void LynxMod::LynxM969() {
+void LynxMod::LynxM969(MessageType mtype) {
 	bool err = false;
 	unsigned long color = 0;
 	/*if (ComC > 0){
@@ -1219,17 +1211,17 @@ void LynxMod::LynxM969() {
 	}*/
 	// Fonction qui va agir selon les données reçues par le GCode M969 SX
 	if (/*Com != ex_Com &&*/ ComC == 969) {
-		//reprap.GetPlatform().MessageF(MessageType::HttpMessage, " M969 Traite\n");
+		//reprap.GetPlatform().MessageF(mtype, " M969 Traite\n");
 		switch (Com) {
 		case 0:
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S1: Toggle flash ON/OFF ('luminosit&eacute; max')\n");
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S2:\nList state color\n\t &empty; List all available states and their colors\n\tP[0-17] Display configured colors for the state\nSet state colors\n\t P[0-17] [R[0-255]] [V[0-255]] [B[0-255]] [W[0-255]]\n");
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S4 Test leds \nS5: Manually set color\n\t&empty; Reset color \n\tR[0-255] V[0-255] B[0-255] W[0-255] L[000-111]  Set LED Color\n\tP[0000-1111]: Set LED Color (Deprecated)\n");
+			reprap.GetPlatform().MessageF(mtype, "S1: Toggle flash ON/OFF ('luminosit&eacute; max')\n");
+			reprap.GetPlatform().MessageF(mtype, "S2:\nList state color\n\t &empty; List all available states and their colors\n\tP[0-17] Display configured colors for the state\nSet state colors\n\t P[0-17] [R[0-255]] [V[0-255]] [B[0-255]] [W[0-255]]\n");
+			reprap.GetPlatform().MessageF(mtype, "S4 Test leds \nS5: Manually set color\n\t&empty; Reset color \n\tR[0-255] V[0-255] B[0-255] W[0-255] L[000-111]  Set LED Color\n\tP[0000-1111]: Set LED Color (Deprecated)\n");
 			break;
 		case 1:
 			// On demande d'allumer le flash
 			//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "S1: %s du flash ('White max')\n", (Modlynx.flash?"extinction":"allumage"));
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "S1: %s du flash ('White max')\n", (Modlynx.flash?"extinction":"allumage"));
+			reprap.GetPlatform().MessageF(mtype, "S1: %s du flash ('White max')\n", (Modlynx.flash?"extinction":"allumage"));
 			//reprap.GetPlatform().GetLogger()->LogMessage(reprap.GetPlatform().GetRealTime(), ";Flash %s;\n", (Modlynx.flash?"OFF":"ON"));
 			Modlynx.flash = !Modlynx.flash;
 			break;
@@ -1239,14 +1231,14 @@ void LynxMod::LynxM969() {
 				if (ComP >= 0) {
 					//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%d >= 0\n", ComP);
 					int i = (ComP/2)*2;
-					reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%8s_DC(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i, (listAmbiances[i].color >> 24), ((listAmbiances[i].color >> 16) & 0xFF), ((listAmbiances[i].color >> 8) & 0xFF), (listAmbiances[i].color & 0xFF));
-					reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%8s_DO(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i+1, (listAmbiances[i+1].color >> 24), ((listAmbiances[i+1].color >> 16) & 0xFF), ((listAmbiances[i+1].color >> 8) & 0xFF), (listAmbiances[i+1].color & 0xFF));
+					reprap.GetPlatform().MessageF(mtype, "%8s_DC(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i, (listAmbiances[i].color >> 24), ((listAmbiances[i].color >> 16) & 0xFF), ((listAmbiances[i].color >> 8) & 0xFF), (listAmbiances[i].color & 0xFF));
+					reprap.GetPlatform().MessageF(mtype, "%8s_DO(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i+1, (listAmbiances[i+1].color >> 24), ((listAmbiances[i+1].color >> 16) & 0xFF), ((listAmbiances[i+1].color >> 8) & 0xFF), (listAmbiances[i+1].color & 0xFF));
 					//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%8s_DC(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i, (listAmbiances[i].color >> 24), ((listAmbiances[i].color >> 16) & 0xFF), ((listAmbiances[i].color >> 8) & 0xFF), (listAmbiances[i].color & 0xFF));
 					//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%8s_DO(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i+1, (listAmbiances[i+1].color >> 24), ((listAmbiances[i+1].color >> 16) & 0xFF), ((listAmbiances[i+1].color >> 8) & 0xFF), (listAmbiances[i+1].color & 0xFF));
 				} else {
 					for (int i = 0; i < 18; i+=2){
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%8s_DC(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i, (listAmbiances[i].color >> 24), ((listAmbiances[i].color >> 16) & 0xFF), ((listAmbiances[i].color >> 8) & 0xFF), (listAmbiances[i].color & 0xFF));
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%8s_DO(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i+1, (listAmbiances[i+1].color >> 24), ((listAmbiances[i+1].color >> 16) & 0xFF), ((listAmbiances[i+1].color >> 8) & 0xFF), (listAmbiances[i+1].color & 0xFF));
+						reprap.GetPlatform().MessageF(mtype, "%8s_DC(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i, (listAmbiances[i].color >> 24), ((listAmbiances[i].color >> 16) & 0xFF), ((listAmbiances[i].color >> 8) & 0xFF), (listAmbiances[i].color & 0xFF));
+						reprap.GetPlatform().MessageF(mtype, "%8s_DO(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i+1, (listAmbiances[i+1].color >> 24), ((listAmbiances[i+1].color >> 16) & 0xFF), ((listAmbiances[i+1].color >> 8) & 0xFF), (listAmbiances[i+1].color & 0xFF));
 						//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%8s_DC(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i, (listAmbiances[i].color >> 24), ((listAmbiances[i].color >> 16) & 0xFF), ((listAmbiances[i].color >> 8) & 0xFF), (listAmbiances[i].color & 0xFF));
 						//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%8s_DO(%02d): R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[i].name, i+1, (listAmbiances[i+1].color >> 24), ((listAmbiances[i+1].color >> 16) & 0xFF), ((listAmbiances[i+1].color >> 8) & 0xFF), (listAmbiances[i+1].color & 0xFF));
 					}
@@ -1282,15 +1274,15 @@ void LynxMod::LynxM969() {
 				if (!err) {
 					listAmbiances[ComP].color = color;
 					if (ComP == (ComP/2)*2)
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%s_DC color updated\n", listAmbiances[(ComP/2)*2].name);
+						reprap.GetPlatform().MessageF(mtype, "%s_DC color updated\n", listAmbiances[(ComP/2)*2].name);
 					else
-						reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%s_DO color updated\n", listAmbiances[(ComP/2)*2].name);
-					//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "%8s_DO: R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[(ComP/2)*2].name, (listAmbiances[((ComP/2)*2)+1].color >> 24), ((listAmbiances[((ComP/2)*2)+1].color >> 16) & 0xFF), ((listAmbiances[((ComP/2)*2)+1].color >> 8) & 0xFF), (listAmbiances[((ComP/2)*2)+1].color & 0xFF));
+						reprap.GetPlatform().MessageF(mtype, "%s_DO color updated\n", listAmbiances[(ComP/2)*2].name);
+					//reprap.GetPlatform().MessageF(mtype, "%8s_DO: R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[(ComP/2)*2].name, (listAmbiances[((ComP/2)*2)+1].color >> 24), ((listAmbiances[((ComP/2)*2)+1].color >> 16) & 0xFF), ((listAmbiances[((ComP/2)*2)+1].color >> 8) & 0xFF), (listAmbiances[((ComP/2)*2)+1].color & 0xFF));
 					//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%8s_DC: R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[(ComP/2)*2].name, (listAmbiances[(ComP/2)*2].color >> 24), ((listAmbiances[(ComP/2)*2].color >> 16) & 0xFF), ((listAmbiances[(ComP/2)*2].color >> 8) & 0xFF), (listAmbiances[(ComP/2)*2].color & 0xFF));
 					//reprap.GetPlatform().MessageF(MessageType::UsbMessage, "%8s_DO: R: %03lu, V: %03lu, B: %03lu, W: %03lu\n", listAmbiances[(ComP/2)*2].name, (listAmbiances[((ComP/2)*2)+1].color >> 24), ((listAmbiances[((ComP/2)*2)+1].color >> 16) & 0xFF), ((listAmbiances[((ComP/2)*2)+1].color >> 8) & 0xFF), (listAmbiances[((ComP/2)*2)+1].color & 0xFF));
 
 				} else {
-					reprap.GetPlatform().MessageF(MessageType::HttpMessage, "incorrect Parameters \n\tS3 P[0-19] R[0-255] V[0-255] B[0-255] W[0-255]\n");
+					reprap.GetPlatform().MessageF(mtype, "incorrect Parameters \n\tS3 P[0-19] R[0-255] V[0-255] B[0-255] W[0-255]\n");
 				}
 			}
 			break;
@@ -1309,7 +1301,7 @@ void LynxMod::LynxM969() {
 
 		case 5:
 			logger->LogMessage(reprap.GetPlatform().GetRealTime(), ";LEDs update;\n");
-			reprap.GetPlatform().MessageF(MessageType::HttpMessage, ";LEDs update;\n");
+			reprap.GetPlatform().MessageF(mtype, ";LEDs update;\n");
 			// Changer la couleur de la machine
 			if (ComP >= 0 && ComP <= 1111) {
 				Modlynx.trame_col=0;
@@ -1398,11 +1390,11 @@ void LynxMod::LynxM969() {
 			}
 
 			if (err) {
-				reprap.GetPlatform().MessageF(MessageType::HttpMessage, "incorrect Parameters \n\tS5 P[0000-1111] / R[0-255] V[0-255] B[0-255] W[0-255] L[000-111]");
+				reprap.GetPlatform().MessageF(mtype, "incorrect Parameters \n\tS5 P[0000-1111] / R[0-255] V[0-255] B[0-255] W[0-255] L[000-111]");
 			} else if (ComP == -1) {
 				Modlynx.new_color = false;
 			} else {
-				//reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Colour changed %lu\n", Modlynx.trame_col);
+				//reprap.GetPlatform().MessageF(mtype, "Colour changed %lu\n", Modlynx.trame_col);
 				Modlynx.new_color = true;
 				Modlynx.newc_cpt = 0;
 			}
@@ -1485,8 +1477,8 @@ void LynxMod::LynxCheck(GCodeBuffer& gb) {
 void LynxMod::Diagnostics(MessageType mtype)
 {
 	reprap.GetPlatform().Message(mtype, "=== Lynx Mod ===\n");
-	reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Safeties are %s\n", (this->EnableSafeties?"enabled":"disabled"));
-	reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Faults are %s\n", (this->EnableFaults?"enabled":"disabled"));
+	reprap.GetPlatform().MessageF(mtype, "Safeties are %s\n", (this->EnableSafeties?"enabled":"disabled"));
+	reprap.GetPlatform().MessageF(mtype, "Faults are %s\n", (this->EnableFaults?"enabled":"disabled"));
 	reprap.GetPlatform().MessageF(mtype, "Door is : %s \n",(Modlynx.porte_ouverte?"Open": "Closed"));
 	reprap.GetPlatform().MessageF(mtype, "Ambiance color is R: %lu, V: %lu, B: %lu, W: %lu\n",(Modlynx.V_AMB >> 24), ((Modlynx.V_AMB >> 16) & 0xFF), ((Modlynx.V_AMB >> 8) & 0xFF), (Modlynx.V_AMB & 0xFF));
 	reprap.GetPlatform().MessageF(mtype, "Button color is : %c, %c, %c\n", (Modlynx.V_VER >> 2?'R':'_'), ((Modlynx.V_VER >> 1)&2?'V':'_'), ((Modlynx.V_VER)&1?'B':'_'));

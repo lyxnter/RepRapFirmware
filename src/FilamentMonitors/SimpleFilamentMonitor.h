@@ -25,7 +25,7 @@ private:
 	void Poll();
 // LYNXMOD
 	uint32_t now, prev;
-	unsigned int noFilament;
+	float noFilament;
 
 	bool highWhenNoFilament;
 	bool filamentPresent;
