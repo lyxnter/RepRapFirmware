@@ -21,11 +21,14 @@ public:
 	void Diagnostics(MessageType mtype, unsigned int extruder) override;
 	bool Interrupt() override;
 
+	size_t GetTrigger() { return trigger; };
+
 private:
 	void Poll();
 // LYNXMOD
 	uint32_t now, prev;
 	float noFilament;
+	size_t trigger;
 
 	bool highWhenNoFilament;
 	bool filamentPresent;

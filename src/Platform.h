@@ -284,11 +284,11 @@ typedef AveragingFilter<Z_PROBE_AVERAGE_READINGS> ZProbeAveragingFilter;
 // Enumeration of error condition bits
 enum class ErrorCode : uint32_t
 {
-	BadTemp = 1u << 0,
-	BadMove = 1u << 1,
-	OutputStarvation = 1u << 2,
-	OutputStackOverflow = 1u << 3,
-	HsmciTimeout = 1u << 4
+	BadTemp = 1u << 0,             //  1
+	BadMove = 1u << 1,             //  2
+	OutputStarvation = 1u << 2,    //  4
+	OutputStackOverflow = 1u << 3, //  8
+	HsmciTimeout = 1u << 4         // 16
 };
 
 struct AxisDriversConfig
@@ -526,6 +526,7 @@ public:
 #endif
 	bool IsFanControllable(size_t fan) const;
 	const char *GetFanName(size_t fan) const;
+	const Fan GetFan(size_t fan) const;
 
 	bool WriteFanSettings(FileStore *f) const;		// Save some resume information
 	uint32_t GetFanRPM(size_t tachoIndex) const;

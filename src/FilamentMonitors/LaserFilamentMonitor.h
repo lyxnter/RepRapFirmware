@@ -19,8 +19,11 @@ public:
 	FilamentSensorStatus Check(bool isPrinting, bool fromIsr, uint32_t isrMillis, float filamentConsumed) override;
 	FilamentSensorStatus Clear() override;
 	void Diagnostics(MessageType mtype, unsigned int extruder) override;
+	size_t GetTrigger() { return trigger; };
 
 private:
+	size_t trigger;
+
 	static constexpr float DefaultMinMovementAllowed = 0.6;
 	static constexpr float DefaultMaxMovementAllowed = 1.6;
 	static constexpr float DefaultMinimumExtrusionCheckLength = 3.0;

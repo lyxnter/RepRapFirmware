@@ -11,9 +11,9 @@
 
 #ifndef VERSION
 #ifdef RTOS
-# define MAIN_VERSION	"2.03.lynx0.2"
+# define MAIN_VERSION	"2.0.3.Lynxter0.0.9"
 #else
-# define MAIN_VERSION	"1.24.lynx0.2"
+# define MAIN_VERSION	"1.24.Lynxter0.0.8"
 #endif
 
 # define VERSION MAIN_VERSION

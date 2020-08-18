@@ -1574,6 +1574,7 @@ void Platform::Spin()
 #if HAS_SMART_DRIVERS
 			ReportDrivers(ErrorMessage, shortToGroundDrivers, "short-to-ground", reported);
 			ReportDrivers(ErrorMessage, temperatureShutdownDrivers, "over temperature shutdown", reported);
+
 			if (openLoadATimer.CheckAndStop(OpenLoadTimeout))
 			{
 				ReportDrivers(WarningMessage, openLoadADrivers, "motor phase A may be disconnected", reported);
@@ -3470,6 +3471,12 @@ void Platform::EnableSharedFan(bool enable)
 bool Platform::IsFanControllable(size_t fan) const
 {
 	return fan < NUM_FANS && !fans[fan].HasMonitoredHeaters() && fans[fan].IsConfigured();
+}
+
+// Return the fan
+const Fan Platform::GetFan(size_t fan) const
+{
+	return fan < NUM_FANS ? fans[fan] : fans[0] ;
 }
 
 // Return the fan's name

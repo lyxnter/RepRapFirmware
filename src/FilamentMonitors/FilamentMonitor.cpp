@@ -218,7 +218,7 @@ bool FilamentMonitor::ConfigurePin(GCodeBuffer& gb, const StringRef& reply, Inte
 					}
 					else
 					{
-						gCodes.FilamentError(extruder, fstat);
+						gCodes.FilamentError(extruder, fstat, fs.GetTrigger());
 					}
 				}
 			}

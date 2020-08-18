@@ -197,7 +197,7 @@ bool Fan::Configure(unsigned int mcode, int fanNum, GCodeBuffer& gb, const Strin
 						reply.catf(" %u", (i < NumHeaters) ? i : FirstVirtualHeater + i - NumHeaters);
 					}
 				}
-				reply.catf(", current speed: %d%%:", (int)(lastVal * 100.0));
+				reply.catf(", current speed: %d%%", (int)(lastVal * 100.0));
 			}
 		}
 	}
@@ -288,7 +288,7 @@ void Fan::Refresh()
 					}
 					else if (lastVal != 0.0 && ht + ThermostatHysteresis > triggerTemperatures[0])		// if the fan is on, add a hysteresis before turning it off
 					{
-						const float minFanSpeed = (bangBangMode) ? max<float>(0.5, val) : minVal;
+						const float minFanSpeed = (bangBangMode) ? max<float>(0.5, val) : 0.01;
 						reqVal = constrain<float>(reqVal, minFanSpeed, maxVal);
 					}
 #if HAS_SMART_DRIVERS
@@ -305,7 +305,8 @@ void Fan::Refresh()
 
 	if (reqVal > 0.0)
 	{
-		reqVal = max<float>(reqVal * maxVal, minVal);		// scale the requested PWM by the maximum, enforce the minimum
+		reqVal = (reqVal * (maxVal - minVal)) + minVal;
+		//reqVal = max<float>(reqVal * maxVal, minVal);		// scale the requested PWM by the maximum, enforce the minimum
 		if (lastVal == 0.0)
 		{
 			// We are turning this fan on

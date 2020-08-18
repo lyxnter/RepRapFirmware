@@ -103,6 +103,7 @@ public:
 	PrintMonitor& GetPrintMonitor() const;
 #if SUPPORT_LYNXMOD //LYNXMOD
 	bool CheckPanelPin(const char* pw) const;
+	bool PanelPinEnabeled() const;
 	void SetPanelPin(const char* pw);
 	char GetStatusCharacter() const;
 	LynxMod& GetLynxMod() const;

@@ -208,7 +208,7 @@ public:
 	size_t GetVisibleAxes() const { return numVisibleAxes; }
 	size_t GetNumExtruders() const { return numExtruders; }
 
-	void FilamentError(size_t extruder, FilamentSensorStatus fstat);
+	void FilamentError(size_t extruder, FilamentSensorStatus fstat, size_t  trigger);
 	void HandleHeaterFault(int heater);									// Respond to a heater fault
 
 #if HAS_VOLTAGE_MONITOR
@@ -240,6 +240,10 @@ public:
 	bool GetLastPrintingHeight(float& height) const;					// Get the height in user coordinates of the last printing move
 
 	GCodeResult StartSDTiming(GCodeBuffer& gb, const StringRef& reply);	// Start timing SD card file writing
+
+	String<MaxFilenameLength> GetLoadedHeightmap() {
+		return loadedHeightmap;
+	}
 
 #if SUPPORT_WORKPLACE_COORDINATES
 	unsigned int GetWorkplaceCoordinateSystemNumber() const { return currentCoordinateSystem + 1; }
@@ -610,6 +614,7 @@ private:
 	// Filament monitoring
 	FilamentSensorStatus lastFilamentError;
 	size_t lastFilamentErrorExtruder;
+	size_t lastFilamentErrorTrigger;
 
 	// Laser
 	float laserMaxPower;
@@ -662,6 +667,8 @@ private:
 
 	static constexpr const float MinServoPulseWidth = 544.0, MaxServoPulseWidth = 2400.0;
 	static constexpr uint16_t ServoRefreshFrequency = 50;
+
+	String<MaxFilenameLength> loadedHeightmap;
 };
 
 // Flag that a new move is available for consumption by the Move subsystem

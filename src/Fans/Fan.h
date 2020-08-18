@@ -26,7 +26,7 @@ public:
 	bool IsConfigured() const { return isConfigured && IsEnabled(); }
 
 	bool IsEnabled() const { return pin != NoPin; }
-	float GetConfiguredPwm() const { return val; }			// returns the configured PWM. Actual PWM may be different, e.g. due to blipping or for thermostatic fans.
+	float GetConfiguredPwm() const { return heatersMonitored ? lastVal : val; }			// returns the configured PWM. Actual PWM may be different, e.g. due to blipping or for thermostatic fans.
 	LogicalPin GetLogicalPin() const { return logicalPin; }
 
 	void Init(Pin p_pin, LogicalPin lp, bool hwInverted, PwmFrequency p_freq);
@@ -41,23 +41,24 @@ public:
 	void Disable();
 	bool WriteSettings(FileStore *f, size_t fanNum) const;	// save the settings of this fan if it isn't thermostatic
 
-private:
-
 	float val;
-	float lastVal;
 	float minVal;
 	float maxVal;
+	float lastVal;
 	float triggerTemperatures[2];
-	float lastPwm;
 	uint32_t blipTime;						// in milliseconds
-	uint32_t blipStartTime;
-	HeatersMonitoredBitmap heatersMonitored;
-	PwmFrequency freq;
-	LogicalPin logicalPin;
-	Pin pin;
-	String<MaxFanNameLength> name;
-	bool isConfigured;
 	bool inverted;
+	String<MaxFanNameLength> name;
+	LogicalPin logicalPin;
+	PwmFrequency freq;
+	HeatersMonitoredBitmap heatersMonitored;
+
+private:
+
+	float lastPwm;
+	uint32_t blipStartTime;
+	Pin pin;
+	bool isConfigured;
 	bool hardwareInverted;
 	bool blipping;
 

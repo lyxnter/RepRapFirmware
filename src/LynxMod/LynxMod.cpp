@@ -50,9 +50,9 @@ const int attente_cancel_reprise = 1500;	// Temps d'attente ou l'utilisateur doi
 
 enum DoorState : char {
 	BP_NO_PRESS = 0,
-	BP_FIRST_PRESS = 1,
-	BP_SECOND_PRESS = 2,
-	BP_OPEN_DOOR = 3
+			BP_FIRST_PRESS = 1,
+			BP_SECOND_PRESS = 2,
+			BP_OPEN_DOOR = 3
 };
 
 #define TEMPERATURE_OUVERTURE 600.0			// Temperature pour laquelle la machine veut bien s'ouvrir
@@ -74,6 +74,10 @@ char logname[13];
 uint32_t now=0, prev=0, ti=0, a=0, tem=0, milli_test=0, reprise_cpt=0, reprise_relache=0, tempo_ouverture=0;
 unsigned long egg_cpt=0, egg_state=0, egg_memoire=0;
 unsigned int cpt_ip=8000;// 2 secondes avant le premier envoi des données lynxter (IP et version firmware pour le moment)
+enum Door_SM {
+	IDLE,
+	BP_PRESSED,
+} door_sm;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////// FIN VARIABLES //////////////////////////////////////////////////
@@ -520,8 +524,8 @@ Emission Transmission;
 unsigned int micros() {return millis()*1000;} //(clock()*1000000)/CLOCKS_PER_SEC;};
 
 LynxMod::LynxMod():
-																										filtrationFan(2),
-																										doorFan(5)
+																														filtrationFan(2),
+																														doorFan(5)
 {
 
 	// Put SCK, MOSI, SS pins into output mode
@@ -757,7 +761,7 @@ void LynxMod::SetSafeHeatedChamberFan()	// Control heated chamber fan PWM to avo
 		if (chamberHeater >= 0) {
 			float chamberPWM = reprap.GetHeat().GetAveragePWM(chamberHeater);
 			float chamberTemp = reprap.GetHeat().GetTemperature(chamberHeater);
-			float heatingPWM = (chamberPWM/4.0)+0.25;
+			float heatingPWM = (chamberPWM/1.35)+0.25;
 			float coolingPWM = (chamberTemp < 165.0 ? (1.5*chamberTemp)/255.0 : 1.0);
 			if(heatingPWM > coolingPWM && chamberPWM > 0.01) {
 				reprap.GetPlatform().SetFanValue(chamberFan, heatingPWM);
@@ -769,8 +773,8 @@ void LynxMod::SetSafeHeatedChamberFan()	// Control heated chamber fan PWM to avo
 }
 
 void LynxMod::Lock(bool cmd) {
-	if (!Modlynx.porte_ouverte) { // porte fermée
-		cmd = false;
+	if (Modlynx.porte_ouverte) { // porte ouverte
+		cmd = true;
 	}
 	if (filtration_fan_pwm < 0 && !cmd){
 		filtration_fan_pwm = reprap.GetPlatform().GetFanValue(filtrationFan);
@@ -786,86 +790,8 @@ void LynxMod::Lock(bool cmd) {
 /* Gère l'ouverture de la porte */
 void LynxMod::Verrouillage() {
 	Modlynx.door_bp_pressed = !digitalRead(INPUT_DOOR_BP); // BP_DOOR
-	char ch = reprap.GetStatusCharacter();// Status de la machine
+	//char ch = reprap.GetStatusCharacter();// Status de la machine
 
-	////////////////////////////////////////////////// FERMETURE //////////////////////////////////////////////////////////
-	// Les heaters sont en logique inverse
-
-	if (/*Modlynx.porte_ouverte*/Modlynx.door_bp_pressed && !Modlynx.door_bp_pressed && egg_state < 10) {
-		// Porte ouverte et BP
-		egg_state = 10;
-		egg_cpt=millis();
-	}
-	if (egg_state >= 10 && !(egg_state%2)) {
-		if ((egg_cpt+500) < millis()) {
-			egg_state = 0;
-		}
-		else if (Modlynx.door_bp_pressed) {
-			// Si on relache
-			egg_state++;
-			egg_cpt=millis();
-		}
-	}
-	else if (egg_state >= 10 && (egg_state%2)) {
-		if ((egg_cpt+500) < millis()) {
-			egg_state = 0;
-		}
-		else if (!Modlynx.door_bp_pressed) {
-			egg_cpt=millis();
-			egg_state++;
-		}
-	}
-	if (egg_state == 15) {
-		egg_state = 0;
-		//reprap.GetPlatform().MessageF(mtype, "Reset egg\n");
-	}
-
-	if (Modlynx.IS_PAUSED) { // Si on a ouvert la porte
-		// SI ON APPUIE SUR LE BOUTON ET LA PORTE EST FERMEE
-		if (ch == 'H' || ch == 'S') { // Si on est vraiment en pause
-			if (Modlynx.door_bp_pressed && !Modlynx.porte_ouverte) {
-				// On compte combien de temps on reste appuyé
-				reprise_cpt++;
-			}
-			// Code pour annuler la reprise de la machine
-			if (!Modlynx.door_bp_pressed && !reprise_relache && !Modlynx.canceling) {
-				reprise_cpt=0;
-				reprise_relache=1;
-			}
-			if (reprise_cpt >= attente_cancel_reprise/Modlynx.synchro) {
-				Modlynx.canceling=1;
-			}
-			if (!Modlynx.canceling) {
-				if (reprise_relache == 1 && Modlynx.door_bp_pressed) {
-					reprise_relache = 2;
-				}
-				if (reprise_relache == 2 && !Modlynx.door_bp_pressed) {
-					// On a relaché le bouton : on reprend
-					LynxGCode = 1;// On lance la macro reprise.g
-					reprise_cpt=0;
-					reprise_relache=0;
-					Modlynx.canceling=0;
-				}
-			}
-			// Code pour finalement ouvrir la porte
-			else if (!Modlynx.door_bp_pressed) { // On relache le BP
-
-				Lock(false);// Il y a déjà une sécurité qui fait que le lock se relache en cas de porte ouverte
-				if (Modlynx.porte_ouverte) { // La porte est ouverte on se remet à zéro
-					Lock(true);
-					reprise_cpt=0;
-					reprise_relache=0;
-					Modlynx.canceling=0;
-				}
-			}
-		}
-		else {
-			// Donc la on est pas vraiment en pause, donc si la porte est fermé on revient en état initial
-			if (!Modlynx.porte_ouverte) {
-				Modlynx.IS_PAUSED = 0;
-			}
-		}
-	}
 	if (Modlynx.panel_open) {
 		// Demande d'ouverture via le panel due
 		if (!Modlynx.porte_ouverte) {
@@ -882,12 +808,9 @@ void LynxMod::Verrouillage() {
 			Modlynx.panel_open=false;
 		}
 	}
-
-	////////////////////////////////////////////////// OUVERTURE //////////////////////////////////////////////////////////
-
-	else { // Ce else pue
+	else {
 		// SI CELA FAIT TROP LONGTEMPS QU'ON A APPUYE SUR LE VERROU
-		if ((Modlynx.DOOR_FLAG == BP_FIRST_PRESS || Modlynx.DOOR_FLAG == BP_SECOND_PRESS) && Modlynx.tempo_flag+attente_2nd_appui <= millis()) {
+		if ((Modlynx.DOOR_FLAG == BP_FIRST_PRESS || Modlynx.DOOR_FLAG == BP_SECOND_PRESS) && Modlynx.tempo_flag + attente_2nd_appui <= millis()) {
 			Modlynx.DOOR_FLAG = BP_NO_PRESS;
 		}
 
@@ -895,30 +818,14 @@ void LynxMod::Verrouillage() {
 		if (Modlynx.door_bp_pressed && Modlynx.DOOR_FLAG == BP_NO_PRESS && !Modlynx.porte_ouverte && !Modlynx.door_request) {
 			Modlynx.DOOR_FLAG = BP_FIRST_PRESS;
 			Modlynx.tempo_flag = millis();
-			egg_state=1;
-		}
-
-		if (egg_state == 1) {
-			egg_cpt++;
-			if (egg_cpt >= 8000/Modlynx.synchro) {
-				egg_state = 2;
-			}
-		}
-
-		if (egg_state == 2) {
-			this->Com = 5;
-			ComP = (egg_memoire == 1) ? 1010 : 1;
-			egg_memoire = ComP;
-			egg_state = 0;
-			egg_cpt = 0;
-			//reprap.GetPlatform().MessageF(mtype, "Auto ComP\n");
+			door_sm = Door_SM::BP_PRESSED;
 		}
 
 		// SI ON RELACHE LE BOUTON
-		if (!Modlynx.door_bp_pressed && Modlynx.DOOR_FLAG == BP_FIRST_PRESS && egg_state < 2) {
+		if (!Modlynx.door_bp_pressed && Modlynx.DOOR_FLAG == BP_FIRST_PRESS && door_sm == Door_SM::BP_PRESSED) {
 			Modlynx.DOOR_FLAG = BP_SECOND_PRESS;
-			egg_state=0;
-			egg_cpt=0;
+			door_sm = Door_SM::IDLE;
+			Modlynx.tempo_flag = millis();
 		}
 
 		// SI ON APPUIE UNE SECONDE FOIS SUR LE VERROU
@@ -930,11 +837,17 @@ void LynxMod::Verrouillage() {
 			}
 			else {
 				// SI ON N'EST PAS EN TRAIN D'IMPRIMER ET IL FAIT FROID : ON PROPOSE L'OUVERTURE
-				if (Modlynx.IDLING) { // Resuming, Simulating, Printing
+				if (Modlynx.IDLING && !reprap.PanelPinEnabeled()) { // Paused / Idle / Off
+					Modlynx.last_warn = millis();
 					Modlynx.door_request = 1;
 					Modlynx.DOOR_FLAG = BP_NO_PRESS;
 				}
 				// SINON ON BLOQUE L'OUVERTURE ET ON EMET UN SIGNAL
+				else if (reprap.PanelPinEnabeled()) {
+					Modlynx.last_warn = millis();
+					Modlynx.opening_flag = 4;
+					Modlynx.DOOR_FLAG = BP_NO_PRESS;
+				}
 				else if (!Modlynx.opening_flag) {
 					Modlynx.last_warn = millis();
 					Modlynx.opening_flag = 3;
@@ -948,27 +861,38 @@ void LynxMod::Verrouillage() {
 			Modlynx.opening_flag = 1;
 		}
 
+
+		if (Modlynx.opening_flag == 4) {
+			reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Porte v&eacute;rouill&eacute;e par mot-de-passe\n\tMerci de la d&eacute;verouiller par l'interface");
+			Modlynx.opening_flag = 1;
+		}
+
 		if ((Modlynx.last_warn + 3000) < millis() && Modlynx.opening_flag == 1) {
 			Modlynx.opening_flag = 0;
+		}
+
+		if (Modlynx.pushpls && (Modlynx.last_warn + 5000) < millis()) { // SI CA FAIT TROP LONGTEMPS QUE LA PORTE EST DEVERROUILLEE
+			Modlynx.door_request = 0;
+			Modlynx.IS_PAUSED = 1;
+			Modlynx.pushpls = false;
+			Lock(true);
 		}
 
 		if (Modlynx.door_request) {
 			// ON A DEMANDER à OUVRIR LA PORTE, ON VERIFIE QUE TOUT EST OK
 			// SI IL FAIT PAS CHAUD : ON OUVRE
 			if (Modlynx.IDLING && (Modlynx.temp_max <= TEMPERATURE_OUVERTURE || Modlynx.heater_fault || Modlynx.temp_max == 2000)) {
-				if (!Modlynx.porte_ouverte) {
+				if (!Modlynx.porte_ouverte && !reprap.PanelPinEnabeled()) {
 					Modlynx.pushpls = true;
 					Lock(false);
-				}
-				else {
+				} else {
 					Modlynx.door_request = 0;
 					Modlynx.IS_PAUSED = 1;
-					//Modlynx.opening_flag = 0;
 					Modlynx.pushpls = false;
 					Lock(true);
 				}
 			}
-			else if (Modlynx.temp_max >= TEMPERATURE_OUVERTURE || Modlynx.heater_fault) {
+			else if (Modlynx.temp_max >= TEMPERATURE_OUVERTURE) {
 				Modlynx.opening_flag = 2; // Attente de la bonne température
 				reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Environnement trop chaud pour ouvrir la porte\n");
 			}
@@ -1147,13 +1071,14 @@ void LynxMod::LynxM968(MessageType mtype){
 		//reprap.GetPlatform().MessageF(mtype, " M968 Trait&eacute;\n");
 		switch (Com){
 		case 0:
-			reprap.GetPlatform().MessageF(mtype, "S1: Ask for door to be open\n");
+			reprap.GetPlatform().MessageF(mtype, "S1: Ask for door to be open\n\t P<pin_number> ;Open door if pin is enabled");
 			reprap.GetPlatform().MessageF(mtype, "S2: &empty; Report door safety sate\n\tP[1/0] ;Enable/Disable door safeties\n");
 			reprap.GetPlatform().MessageF(mtype, "S3: &empty; Reports error reporting state\n\tP[1/0] ;Enable/Disable LED display Error states\n");
 			break;
 		case 1:
 			// On demande d'ouvrir la porte
 			logger->LogMessage(reprap.GetPlatform().GetRealTime(), ";Panel Due door opening request;\n");
+			reprap.GetPlatform().MessageF(mtype, "Opening door\n");
 			if (!Modlynx.porte_ouverte) {
 				if (EnableSafeties){
 					// Si la porte est fermée

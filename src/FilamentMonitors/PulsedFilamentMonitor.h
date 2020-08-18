@@ -20,8 +20,11 @@ public:
 	FilamentSensorStatus Clear() override;
 	void Diagnostics(MessageType mtype, unsigned int extruder) override;
 	bool Interrupt() override;
+	size_t GetTrigger() { return trigger; };
 
 private:
+	size_t trigger;
+
 	static constexpr float DefaultMmPerPulse = 1.0;
 	static constexpr float DefaultMinMovementAllowed = 0.6;
 	static constexpr float DefaultMaxMovementAllowed = 1.6;

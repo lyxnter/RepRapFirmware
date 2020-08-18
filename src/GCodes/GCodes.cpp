@@ -1814,25 +1814,56 @@ void GCodes::CheckTriggers()
 void GCodes::CheckFilament()
 {
 	if (   lastFilamentError != FilamentSensorStatus::ok			// check for a filament error
-		&& IsReallyPrinting()
-		&& autoPauseGCode->IsCompletelyIdle()
-		&& LockMovement(*autoPauseGCode)							// need to lock movement before executing the pause macro
-	   )
-	{
-		String<MediumStringLength> filamentErrorString;
-		filamentErrorString.printf("Extruder %u reports %s", lastFilamentErrorExtruder, FilamentMonitor::GetErrorMessage(lastFilamentError));
-		DoPause(*autoPauseGCode, PauseReason::filament, filamentErrorString.c_str());
-		lastFilamentError = FilamentSensorStatus::ok;
-		platform.Message(LogMessage, filamentErrorString.c_str());
+			&& IsReallyPrinting()) {
+		if (lastFilamentErrorTrigger < MaxTriggers						// if a trigger is pending
+				&& !IsDaemonBusy()
+				&& daemonGCode->GetState() == GCodeState::normal		// and we are not already executing a trigger or config.g
+		)
+		{
+			if (lastFilamentErrorTrigger == 1)
+			{
+				if (LockMovement(*daemonGCode))					// need to lock movement before executing the pause macro
+				{
+					String<MediumStringLength> filamentErrorString;
+					filamentErrorString.printf("Print paused by external trigger");
+					DoPause(*daemonGCode, PauseReason::trigger, filamentErrorString.c_str());
+					lastFilamentError = FilamentSensorStatus::ok;
+					lastFilamentErrorTrigger = MaxTriggers;
+					platform.Message(LogMessage, filamentErrorString.c_str());
+				}
+			}
+			else
+			{
+				String<StringLength20> filename;
+				filename.printf("trigger%u.g", lastFilamentErrorTrigger);
+				lastFilamentError = FilamentSensorStatus::ok;
+				DoFileMacro(*daemonGCode, filename.c_str(), true);
+				lastFilamentErrorTrigger = MaxTriggers;
+			}
+		}
+		else if ( autoPauseGCode->IsCompletelyIdle()
+				&& LockMovement(*autoPauseGCode)							// need to lock movement before executing the pause macro
+		)
+		{
+			String<MediumStringLength> filamentErrorString;
+			filamentErrorString.printf("Extruder %u reports %s",
+					lastFilamentErrorExtruder,
+					FilamentMonitor::GetErrorMessage(lastFilamentError));
+			DoPause(*autoPauseGCode, PauseReason::filament, filamentErrorString.c_str());
+			lastFilamentError = FilamentSensorStatus::ok;
+			lastFilamentErrorTrigger = MaxTriggers;
+			platform.Message(LogMessage, filamentErrorString.c_str());
+		}
 	}
 }
 
 // Log a filament error. Called by Platform when a filament sensor reports an incorrect status and a print is in progress.
-void GCodes::FilamentError(size_t extruder, FilamentSensorStatus fstat)
+void GCodes::FilamentError(size_t extruder, FilamentSensorStatus fstat, size_t trigger)
 {
 	if (lastFilamentError == FilamentSensorStatus::ok)
 	{
 		lastFilamentErrorExtruder = extruder;
+		lastFilamentErrorTrigger = trigger;
 		lastFilamentError = fstat;
 	}
 }
@@ -3552,6 +3583,7 @@ GCodeResult GCodes::LoadHeightMap(GCodeBuffer& gb, const StringRef& reply)
 		return GCodeResult::warning;
 	}
 
+	loadedHeightmap = heightMapFileName;
 	return GCodeResult::ok;
 }
 

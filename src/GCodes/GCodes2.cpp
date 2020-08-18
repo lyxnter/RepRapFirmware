@@ -243,6 +243,10 @@ bool GCodes::HandleGcode(GCodeBuffer& gb, const StringRef& reply)
 				ClearBedMapping();
 				break;
 
+			case 3:    // save heightmap to another file
+				result = GetGCodeResultFromError(SaveHeightMap(gb, reply));
+				break;
+
 			default:
 				result = GCodeResult::badOrMissingParameter;
 				break;
@@ -4393,18 +4397,40 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 
 #if SUPPORT_LYNXMOD
 		case 968:
+
 			if (gb.Seen('S')) { // Parametre S
 				unsigned int val = gb.GetFValue();
 				lynxMod.ComC = 968;
 				lynxMod.Com = val;
 				//reprap.GetPlatform().MessageF(MessageType::HttpMessage, " M968 Recu (S%d detecte)\n", val);
 				lynxMod.ComP = -1;
-				if (gb.Seen('P')) { // Parametre P
-					int pval = gb.GetFValue();
-					lynxMod.ComP = pval;
+
+				if (lynxMod.Com == 1) {
+					String<5> oldPanelPin;
+					bool seen = false;
+					bool enabled = reprap.PanelPinEnabeled();
+					// Verification du password en P
+					gb.TryGetPossiblyQuotedString('P', oldPanelPin.GetRef(), seen);
+					if (seen || !enabled) {
+						if (reprap.CheckPanelPin(oldPanelPin.c_str()) || !enabled) {
+							// Match
+							seen = false;
+							reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Panel pin match\n");
+							lynxMod.ComDate = millis();
+							lynxMod.LynxM968(MessageType::HttpMessage);
+						} else {
+							lynxMod.Com = -1;
+						}
+					}
+				} else {
+
+					if (gb.Seen('P')) { // Parametre P
+						int pval = gb.GetFValue();
+						lynxMod.ComP = pval;
+					}
+					lynxMod.ComDate = millis();
+					lynxMod.LynxM968(MessageType::HttpMessage);
 				}
-				lynxMod.ComDate = millis();
-				lynxMod.LynxM968(MessageType::HttpMessage);
 			}
 			break;
 		case 969: // Communication with LynxMod:lights
