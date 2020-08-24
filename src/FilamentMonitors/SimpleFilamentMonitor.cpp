@@ -11,7 +11,7 @@
 #include "GCodes/GCodeBuffer.h"
 
 SimpleFilamentMonitor::SimpleFilamentMonitor(unsigned int extruder, int type)
-: FilamentMonitor(extruder, type), trigger(0), highWhenNoFilament(type == 2), filamentPresent(false), enabled(false)
+	: FilamentMonitor(extruder, type), highWhenNoFilament(type == 2), filamentPresent(false), enabled(false)
 {
 }
 
@@ -29,25 +29,17 @@ bool SimpleFilamentMonitor::Configure(GCodeBuffer& gb, const StringRef& reply, b
 		enabled = (gb.GetIValue() > 0);
 	}
 
-	if (gb.Seen('T'))
-	{
-		seen = true;
-		trigger = (gb.GetUIValue());
-	}
-
 	if (seen)
 	{
-		this->Check(false, false, 0, 0.0);
+		Check(false, false, 0, 0.0);
 	}
 	else
 	{
-		reply.printf("Simple filament sensor on endstop %d, %s, output %s when no filament, filament present: %s, call %s%c when empty",
-				GetEndstopNumber(),
-				(enabled) ? "enabled" : "disabled",
+		reply.printf("Simple filament sensor on endstop %d, %s, output %s when no filament, filament present: %s",
+						GetEndstopNumber(),
+						(enabled) ? "enabled" : "disabled",
 						(highWhenNoFilament) ? "high" : "low",
-								(filamentPresent) ? "yes" : "no",
-										(trigger) ? "trigger" : "pause",
-												(trigger) ? (char)(trigger+(size_t)'0') : ' ');
+						(filamentPresent) ? "yes" : "no");
 	}
 
 	return false;

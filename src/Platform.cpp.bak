@@ -3479,12 +3479,6 @@ bool Platform::IsFanControllable(size_t fan) const
 	return fan < NUM_FANS && !fans[fan].HasMonitoredHeaters() && fans[fan].IsConfigured();
 }
 
-// Return the fan
-const Fan Platform::GetFan(size_t fan) const
-{
-	return fan < NUM_FANS ? fans[fan] : fans[0] ;
-}
-
 // Return the fan's name
 const char *Platform::GetFanName(size_t fan) const
 {

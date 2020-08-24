@@ -24,40 +24,22 @@
 #if SAME70
 
 constexpr unsigned int DdaRingLength = 40;
-constexpr unsigned int AuxDdaRingLength = 3;
-constexpr unsigned int NumDms = (DdaRingLength/2 * 12) + (AuxDdaRingLength * 3);	// allow enough for plenty of CAN expansion
+constexpr unsigned int NumDms = DdaRingLength/2 * 12;								// allow enough for plenty of CAN expansion
 
 #elif SAM4E || SAM4S
 
 constexpr unsigned int DdaRingLength = 40;
-constexpr unsigned int AuxDdaRingLength = 3;
-const unsigned int NumDms = (DdaRingLength/2 * 8) + (AuxDdaRingLength * 3);			// suitable for e.g. a delta + 5 input hot end
+const unsigned int NumDms = DdaRingLength/2 * 8;									// suitable for e.g. a delta + 5 input hot end
 
 #else
 
 // We are more memory-constrained on the SAM3X
 const unsigned int DdaRingLength = 20;
-const unsigned int NumDms = 20 * 5;									// suitable for e.g. a delta + 2-input hot end
+const unsigned int NumDms = 20 * 5;													// suitable for e.g. a delta + 2-input hot end
 
 #endif
 
-constexpr uint32_t MovementStartDelayClocks = StepTimer::StepClockRate/100;		// 10ms delay between preparing the first move and starting it
-
-enum EndstopHitAction
-{
-	noStop = 0,
-	stopDriver = 1,
-	stopAxis = 2,
-	stopAll = 3
-};
-
-struct EndstopAction
-{
-	uint16_t driver : 4,			// which driver to stop if the action is stopDriver
-			 axis : 4,				// which axis to stop if the action is stopAxis, and which axis to set the position of if setAxisPos is true
-			 action : 2,			// the EndstopHitAction for this endstop
-			 setAxisPos : 1;		// whether or not to set the axis position to its min or max
-};
+constexpr uint32_t MovementStartDelayClocks = StepTimer::StepClockRate/100;			// 10ms delay between preparing the first move and starting it
 
 // This is the master movement class.  It controls all movement in the machine.
 class Move INHERIT_OBJECT_MODEL
@@ -69,10 +51,10 @@ public:
 	void Exit();													// Shut down
 
 	void GetCurrentMachinePosition(float m[MaxAxes], bool disableMotorMapping) const; // Get the current position in untransformed coords
-	void GetCurrentUserPosition(float m[MaxAxes], uint8_t moveType, AxesBitmap xAxes, AxesBitmap yAxes) const;
+	void GetCurrentUserPosition(float m[MaxAxes], uint8_t moveType, const Tool *tool) const;
 																	// Return the position (after all queued moves have been executed) in transformed coords
 	int32_t GetEndPoint(size_t drive) const;					 	// Get the current position of a motor
-	void LiveCoordinates(float m[MaxTotalDrivers], AxesBitmap xAxes, AxesBitmap yAxes);	// Gives the last point at the end of the last complete DDA transformed to user coords
+	void LiveCoordinates(float m[MaxTotalDrivers], const Tool *tool);	// Gives the last point at the end of the last complete DDA transformed to user coords
 	void Interrupt() __attribute__ ((hot));							// The hardware's (i.e. platform's)  interrupt should call this.
 	bool AllMovesAreFinished();										// Is the look-ahead ring empty?  Stops more moves being added as well.
 	void DoLookAhead() __attribute__ ((hot));						// Run the look-ahead procedure
@@ -86,9 +68,9 @@ public:
 	void SetAxisCompensation(unsigned int axis, float tangent);		// Set an axis-pair compensation angle
 	float AxisCompensation(unsigned int axis) const;				// The tangent value
 	void SetIdentityTransform();									// Cancel the bed equation; does not reset axis angle compensation
-	void AxisAndBedTransform(float move[], AxesBitmap xAxes, AxesBitmap yAxes, bool useBedCompensation) const;
+	void AxisAndBedTransform(float move[], const Tool *tool, bool useBedCompensation) const;
 																	// Take a position and apply the bed and the axis-angle compensations
-	void InverseAxisAndBedTransform(float move[], AxesBitmap xAxes, AxesBitmap yAxes) const;
+	void InverseAxisAndBedTransform(float move[], const Tool *tool) const;
 																	// Go from a transformed point back to user coordinates
 	void SetZeroHeightError(const float coords[MaxAxes]);			// Set zero height error at these coordinates
 	float GetTaperHeight() const { return (useTaper) ? taperHeight : 0.0; }
@@ -187,12 +169,12 @@ private:
 		timing			// no moves being executed or in queue, motors are at full current
 	};
 
-	void BedTransform(float move[MaxAxes], AxesBitmap xAxes, AxesBitmap yAxes) const;			// Take a position and apply the bed compensations
-	void InverseBedTransform(float move[MaxAxes], AxesBitmap xAxes, AxesBitmap yAxes) const;	// Go from a bed-transformed point back to user coordinates
-	void AxisTransform(float move[MaxAxes], AxesBitmap xAxes, AxesBitmap yAxes) const;			// Take a position and apply the axis-angle compensations
-	void InverseAxisTransform(float move[MaxAxes], AxesBitmap xAxes, AxesBitmap yAxes) const;	// Go from an axis transformed point back to user coordinates
+	void BedTransform(float move[MaxAxes], const Tool *tool) const;			// Take a position and apply the bed compensations
+	void InverseBedTransform(float move[MaxAxes], const Tool *tool) const;	// Go from a bed-transformed point back to user coordinates
+	void AxisTransform(float move[MaxAxes], const Tool *tool) const;		// Take a position and apply the axis-angle compensations
+	void InverseAxisTransform(float move[MaxAxes], const Tool *tool) const;	// Go from an axis transformed point back to user coordinates
 	void SetPositions(const float move[MaxTotalDrivers]) { return mainDDARing.SetPositions(move); }	// Force the machine coordinates to be these;
-	float GetInterpolatedHeightError(float xCoord, float yCoord) const;							// Get the height error at an XY position
+	float GetInterpolatedHeightError(float xCoord, float yCoord) const;		// Get the height error at an XY position
 
 	DDARing mainDDARing;								// The DDA ring used for regular moves
 
@@ -230,12 +212,7 @@ private:
 	Kinematics *kinematics;								// What kinematics we are using
 
 	float specialMoveCoords[MaxTotalDrivers];			// Amounts by which to move individual motors (leadscrew adjustment move)
-	bool bedLevellingMoveAvailable;							// True if a leadscrew adjustment move is pending
-
-	EndstopAction endstopActions[NumEndstops];
-#if HAS_STALL_DETECT
-	EndstopAction stallActions[NumDirectDrivers];
-#endif
+	bool bedLevellingMoveAvailable;						// True if a leadscrew adjustment move is pending
 };
 
 //******************************************************************************************************
@@ -260,10 +237,10 @@ inline void Move::AdjustMotorPositions(const float adjustment[], size_t numMotor
 
 // Return the current live XYZ and extruder coordinates
 // Interrupts are assumed enabled on entry
-inline void Move::LiveCoordinates(float m[MaxTotalDrivers], AxesBitmap xAxes, AxesBitmap yAxes)
+inline void Move::LiveCoordinates(float m[MaxTotalDrivers], const Tool *tool)
 {
 	mainDDARing.LiveCoordinates(m);
-	InverseAxisAndBedTransform(m, xAxes, yAxes);
+	InverseAxisAndBedTransform(m, tool);
 }
 
 // These are the actual numbers that we want to be the coordinates, so don't transform them.

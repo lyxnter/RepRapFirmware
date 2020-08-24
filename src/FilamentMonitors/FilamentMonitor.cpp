@@ -58,6 +58,13 @@ bool FilamentMonitor::ConfigurePin(GCodeBuffer& gb, const StringRef& reply, Inte
 			reply.copy("unsuitable endstop number");
 			return true;
 		}
+
+		// Disable the pullup resistor except on Duet WiFi/Ethernet CONN_LCD endstop inputs, to provide greater noise immunity when using a Duet3D laser of magnetic filament monitor
+#ifdef DUET_NG
+		setPullup(pin, endstop >= 10);
+#else
+		setPullup(pin, false);
+#endif
 	}
 	else if (seen)
 	{
@@ -218,7 +225,7 @@ bool FilamentMonitor::ConfigurePin(GCodeBuffer& gb, const StringRef& reply, Inte
 					}
 					else
 					{
-						gCodes.FilamentError(extruder, fstat, fs.GetTrigger());
+						gCodes.FilamentError(extruder, fstat);
 					}
 				}
 			}

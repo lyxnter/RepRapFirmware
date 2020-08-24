@@ -92,9 +92,9 @@ extern "C" void hsmciIdle(uint32_t stBits, uint32_t dmaBits)
 {
 	if (   (HSMCI->HSMCI_SR & stBits) == 0
 #if SAME70
-			&& (XDMAC->XDMAC_CHID[DmacChanHsmci].XDMAC_CIS & dmaBits) == 0
+		&& (XDMAC->XDMAC_CHID[DmacChanHsmci].XDMAC_CIS & dmaBits) == 0
 #endif
-	)
+	   )
 	{
 		// Suspend this task until we get an interrupt indicating that a status bit that we are interested in has been set
 		hsmciTask = xTaskGetCurrentTaskHandle();
@@ -154,13 +154,13 @@ extern "C" void hsmciIdle(uint32_t stBits, uint32_t dmaBits)
 
 const ObjectModelTableEntry RepRap::objectModelTable[] =
 {
-		// These entries are temporary pending design of the object model
-		//TODO design the object model
-		{ "gcodes", OBJECT_MODEL_FUNC(&(self->GetGCodes())), TYPE_OF(ObjectModel), ObjectModelTableEntry::none },
-		{ "meshProbe", OBJECT_MODEL_FUNC(&(self->GetMove().GetGrid())), TYPE_OF(ObjectModel), ObjectModelTableEntry::none },
-		{ "move", OBJECT_MODEL_FUNC(&(self->GetMove())), TYPE_OF(ObjectModel), ObjectModelTableEntry::none },
-		{ "network", OBJECT_MODEL_FUNC(&(self->GetNetwork())), TYPE_OF(ObjectModel), ObjectModelTableEntry::none },
-		{ "randomProbe", OBJECT_MODEL_FUNC(&(self->GetMove().GetProbePoints())), TYPE_OF(ObjectModel), ObjectModelTableEntry::none },
+	// These entries are temporary pending design of the object model
+	//TODO design the object model
+	{ "gcodes", OBJECT_MODEL_FUNC(&(self->GetGCodes())), TYPE_OF(ObjectModel), ObjectModelTableEntry::none },
+	{ "meshProbe", OBJECT_MODEL_FUNC(&(self->GetMove().GetGrid())), TYPE_OF(ObjectModel), ObjectModelTableEntry::none },
+	{ "move", OBJECT_MODEL_FUNC(&(self->GetMove())), TYPE_OF(ObjectModel), ObjectModelTableEntry::none },
+	{ "network", OBJECT_MODEL_FUNC(&(self->GetNetwork())), TYPE_OF(ObjectModel), ObjectModelTableEntry::none },
+	{ "randomProbe", OBJECT_MODEL_FUNC(&(self->GetMove().GetProbePoints())), TYPE_OF(ObjectModel), ObjectModelTableEntry::none },
 };
 
 DEFINE_GET_OBJECT_MODEL_TABLE(RepRap)
@@ -172,13 +172,13 @@ DEFINE_GET_OBJECT_MODEL_TABLE(RepRap)
 // Do nothing more in the constructor; put what you want in RepRap:Init()
 
 RepRap::RepRap() : toolList(nullptr), currentTool(nullptr), lastWarningMillis(0), activeExtruders(0),
-activeToolHeaters(0), ticksInSpinState(0),
+	activeToolHeaters(0), ticksInSpinState(0),
 #ifdef RTOS
-heatTaskIdleTicks(0),
+	heatTaskIdleTicks(0),
 #endif
-spinningModule(noModule), debug(0), stopped(false),
-active(false), resetting(false), processingConfig(true), beepFrequency(0), beepDuration(0),
-diagnosticsDestination(MessageType::NoDestinationMessage), justSentDiagnostics(false)
+	spinningModule(noModule), debug(0), stopped(false),
+	active(false), resetting(false), processingConfig(true), beepFrequency(0), beepDuration(0),
+	diagnosticsDestination(MessageType::NoDestinationMessage), justSentDiagnostics(false)
 {
 	OutputBuffer::Init();
 	platform = new Platform();
@@ -204,7 +204,7 @@ diagnosticsDestination(MessageType::NoDestinationMessage), justSentDiagnostics(f
 	portControl = new PortControl();
 #endif
 #if SUPPORT_12864_LCD
-	display = new Display();
+ 	display = new Display();
 #endif
 
 	printMonitor = new PrintMonitor(*platform, *gCodes);
@@ -355,7 +355,7 @@ void RepRap::Exit()
 	portControl->Exit();
 #endif
 #if SUPPORT_12864_LCD
-	display->Exit();
+ 	display->Exit();
 #endif
 	network->Exit();
 	platform->Exit();
@@ -726,7 +726,7 @@ void RepRap::StandbyTool(int toolNumber, bool simulating)
 		{
 			tool->Standby();
 		}
-		if (currentTool == tool)
+  		if (currentTool == tool)
 		{
 			currentTool = nullptr;
 		}
@@ -815,28 +815,28 @@ void RepRap::Tick()
 #else
 				if (ticksInSpinState >= MaxTicksInSpinState)					// if we stall for 20 seconds, save diagnostic data and reset
 #endif
+			{
+				resetting = true;
+				for (size_t i = 0; i < NumHeaters; i++)
 				{
-					resetting = true;
-					for (size_t i = 0; i < NumHeaters; i++)
-					{
-						platform->SetHeater(i, 0.0);
-					}
-					platform->DisableAllDrives();
-
-					// We now save the stack when we get stuck in a spin loop
-#ifdef RTOS
-					__asm volatile("mrs r2, psp");
-					register const uint32_t * stackPtr asm ("r2");					// we want the PSP not the MSP
-					platform->SoftwareReset(
-							(heatTaskStuck) ? (uint16_t)SoftwareResetReason::heaterWatchdog : (uint16_t)SoftwareResetReason::stuckInSpin,
-									stackPtr + 5);												// discard uninteresting registers, keep LR PC PSR
-#else
-					register const uint32_t * stackPtr asm ("sp");
-					platform->SoftwareReset(
-							(uint16_t)SoftwareResetReason::stuckInSpin,
-							stackPtr + 5);												// discard uninteresting registers, keep LR PC PSR
-#endif
+					platform->SetHeater(i, 0.0);
 				}
+				platform->DisableAllDrives();
+
+				// We now save the stack when we get stuck in a spin loop
+#ifdef RTOS
+				__asm volatile("mrs r2, psp");
+				register const uint32_t * stackPtr asm ("r2");					// we want the PSP not the MSP
+				platform->SoftwareReset(
+					(heatTaskStuck) ? (uint16_t)SoftwareResetReason::heaterWatchdog : (uint16_t)SoftwareResetReason::stuckInSpin,
+					stackPtr + 5);												// discard uninteresting registers, keep LR PC PSR
+#else
+				register const uint32_t * stackPtr asm ("sp");
+				platform->SoftwareReset(
+					(uint16_t)SoftwareResetReason::stuckInSpin,
+					stackPtr + 5);												// discard uninteresting registers, keep LR PC PSR
+#endif
+			}
 		}
 	}
 }
@@ -904,7 +904,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 		else
 #endif
 		{
-			move->LiveCoordinates(liveCoordinates, GetCurrentXAxes(), GetCurrentYAxes());
+			move->LiveCoordinates(liveCoordinates, currentTool);
 		}
 
 		// Machine coordinates
@@ -934,7 +934,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 	response->catf("]},\"speeds\":{\"requested\":%.1f,\"top\":%.1f}",
 			(double)move->GetRequestedSpeed(), (double)move->GetTopSpeed());
 
-	// Current tool number
+ 	// Current tool number
 	response->catf(",\"currentTool\":%d", GetCurrentToolNumber());
 
 	// Output notifications
@@ -1075,15 +1075,15 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 		int v1, v2;
 		switch (platform->GetZProbeSecondaryValues(v1, v2))
 		{
-		case 1:
-			response->catf("\"probeValue\":%d,\"probeSecondary\":[%d]", v0, v1);
-			break;
-		case 2:
-			response->catf("\"probeValue\":%d,\"probeSecondary\":[%d,%d]", v0, v1, v2);
-			break;
-		default:
-			response->catf("\"probeValue\":%d", v0);
-			break;
+			case 1:
+				response->catf("\"probeValue\":%d,\"probeSecondary\":[%d]", v0, v1);
+				break;
+			case 2:
+				response->catf("\"probeValue\":%d,\"probeSecondary\":[%d,%d]", v0, v1, v2);
+				break;
+			default:
+				response->catf("\"probeValue\":%d", v0);
+				break;
 		}
 
 		// Send fan RPM value(s)
@@ -1118,7 +1118,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 		if (bedHeater != -1)
 		{
 			response->catf("\"bed\":{\"current\":%.1f,\"active\":%.1f,\"standby\":%.1f,\"state\":%d,\"heater\":%d},",
-					(double)heat->GetTemperature(bedHeater), (double)heat->GetActiveTemperature(bedHeater), (double)heat->GetStandbyTemperature(bedHeater),
+				(double)heat->GetTemperature(bedHeater), (double)heat->GetActiveTemperature(bedHeater), (double)heat->GetStandbyTemperature(bedHeater),
 					heat->GetStatus(bedHeater), bedHeater);
 		}
 
@@ -1127,7 +1127,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 		if (chamberHeater != -1)
 		{
 			response->catf("\"chamber\":{\"current\":%.1f,\"active\":%.1f,\"state\":%d,\"heater\":%d},",
-					(double)heat->GetTemperature(chamberHeater), (double)heat->GetActiveTemperature(chamberHeater),
+				(double)heat->GetTemperature(chamberHeater), (double)heat->GetActiveTemperature(chamberHeater),
 					heat->GetStatus(chamberHeater), chamberHeater);
 		}
 
@@ -1136,7 +1136,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 		if (cabinetHeater != -1)
 		{
 			response->catf("\"cabinet\":{\"current\":%.1f,\"active\":%.1f,\"state\":%d,\"heater\":%d},",
-					(double)heat->GetTemperature(cabinetHeater), (double)heat->GetActiveTemperature(cabinetHeater),
+				(double)heat->GetTemperature(cabinetHeater), (double)heat->GetActiveTemperature(cabinetHeater),
 					heat->GetStatus(cabinetHeater), cabinetHeater);
 		}
 
@@ -1172,6 +1172,16 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 				response->cat(ch);
 				ch = ',';
 				response->EncodeString(GetHeat().GetHeaterName(heater), true);
+			}
+			response->cat((ch == '[') ? "[]" : "]");
+
+			response->cat(",\"sensors\":");
+			ch = '[';
+			for (size_t heater = 0; heater < NumHeaters; heater++)
+			{
+				response->cat(ch);
+				ch = ',';
+				response->catf("%d", GetHeat().GetHeaterChannel(heater));
 			}
 			response->cat((ch == '[') ? "[]" : "]");
 		}
@@ -1291,8 +1301,8 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 	if (type == 2)
 	{
 		// Cold Extrude/Retract
-		response->catf(",\"coldExtrudeTemp\":%.1f", (double)(heat->ColdExtrude() ? 0.0 : HOT_ENOUGH_TO_EXTRUDE));
-		response->catf(",\"coldRetractTemp\":%.1f", (double)(heat->ColdExtrude() ? 0.0 : HOT_ENOUGH_TO_RETRACT));
+		response->catf(",\"coldExtrudeTemp\":%.1f", (double)(heat->ColdExtrude() ? 0.0 : GetHeat().GetExtrusionMinTemp()/*HOT_ENOUGH_TO_EXTRUDE*/));
+		response->catf(",\"coldRetractTemp\":%.1f", (double)(heat->ColdExtrude() ? 0.0 : GetHeat().GetRetractionMinTemp()/*HOT_ENOUGH_TO_RETRACT*/));
 
 		// Compensation type
 		response->cat(",\"compensation\":");
@@ -1346,7 +1356,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 
 		// Firmware name, machine geometry and number of axes
 		response->catf(",\"firmwareName\":\"%s\",\"geometry\":\"%s\",\"axes\":%u,\"totalAxes\":%u,\"axisNames\":\"%s\"",
-				FIRMWARE_NAME, move->GetGeometryString(), numVisibleAxes, numTotalAxes, gCodes->GetAxisLetters());
+			FIRMWARE_NAME, move->GetGeometryString(), numVisibleAxes, numTotalAxes, gCodes->GetAxisLetters());
 
 		// Total and mounted volumes
 		size_t mountedCards = 0;
@@ -1661,6 +1671,14 @@ OutputBuffer *RepRap::GetConfigResponse()
 
 	response->catf(",\"firmwareDate\":\"%s\"", DATE);
 
+	// System files folder
+	{
+		String<MaxFilenameLength> sysdir;
+		platform->GetSysDir(sysdir.GetRef());
+		response->catf(", \"sysdir\":");
+		response->EncodeString(sysdir, false);
+	}
+
 	// Motor idle parameters
 	response->catf(",\"idleCurrentFactor\":%.1f", (double)(platform->GetIdleCurrentFactor() * 100.0));
 	response->catf(",\"idleTimeout\":%.1f", (double)(move->IdleTimeout()));
@@ -1767,7 +1785,7 @@ OutputBuffer *RepRap::GetLegacyStatusResponse(uint8_t type, int seq)
 
 	// Now the machine coordinates
 	float liveCoordinates[MaxTotalDrivers];
-	move->LiveCoordinates(liveCoordinates, GetCurrentXAxes(), GetCurrentYAxes());
+	move->LiveCoordinates(liveCoordinates, currentTool);
 	response->catf("],\"machine\":");		// announce the machine position
 	ch = '[';
 	for (size_t drive = 0; drive < numVisibleAxes; drive++)
@@ -1873,7 +1891,7 @@ OutputBuffer *RepRap::GetLegacyStatusResponse(uint8_t type, int seq)
 		if (mbox.active)
 		{
 			response->catf(",\"msgBox.mode\":%d,\"msgBox.seq\":%" PRIu32 ",\"msgBox.timeout\":%.1f,\"msgBox.controls\":%u",
-					mbox.mode, mbox.seq, (double)timeLeft, mbox.controls);
+							mbox.mode, mbox.seq, (double)timeLeft, mbox.controls);
 			response->cat(",\"msgBox.msg\":");
 			response->EncodeString(mbox.message, false);
 			response->cat(",\"msgBox.title\":");
@@ -1900,7 +1918,7 @@ OutputBuffer *RepRap::GetLegacyStatusResponse(uint8_t type, int seq)
 	{
 		// Add the static fields
 		response->catf(",\"geometry\":\"%s\",\"axes\":%u,\"totalAxes\":%u,\"axisNames\":\"%s\",\"volumes\":%u,\"numTools\":%u,\"myName\":",
-				move->GetGeometryString(), numVisibleAxes, gCodes->GetTotalAxes(), gCodes->GetAxisLetters(), NumSdCards, GetNumberOfContiguousTools());
+						move->GetGeometryString(), numVisibleAxes, gCodes->GetTotalAxes(), gCodes->GetAxisLetters(), NumSdCards, GetNumberOfContiguousTools());
 		response->EncodeString(myName, false);
 		response->cat(",\"firmwareName\":");
 		response->EncodeString(FIRMWARE_NAME, false);
@@ -2094,8 +2112,11 @@ bool RepRap::GetFileInfoResponse(const char *filename, OutputBuffer *&response, 
 	{
 		// Poll file info for a specific file
 		String<MaxFilenameLength> filePath;
-		MassStorage::CombineName(filePath.GetRef(), platform->GetGCodeDir(), filename);
-		if (!platform->GetMassStorage()->GetFileInfo(filePath.c_str(), info, quitEarly))
+		if (!MassStorage::CombineName(filePath.GetRef(), platform->GetGCodeDir(), filename))
+		{
+			info.isValid = false;
+		}
+		else if (!platform->GetMassStorage()->GetFileInfo(filePath.c_str(), info, quitEarly))
 		{
 			// This may take a few runs...
 			return false;
@@ -2123,7 +2144,7 @@ bool RepRap::GetFileInfoResponse(const char *filename, OutputBuffer *&response, 
 		}
 
 		response->catf("\"height\":%.2f,\"firstLayerHeight\":%.2f,\"layerHeight\":%.2f,",
-				(double)info.objectHeight, (double)info.firstLayerHeight, (double)info.layerHeight);
+					HideNan(info.objectHeight), HideNan(info.firstLayerHeight), HideNan(info.layerHeight));
 		if (info.printTime != 0)
 		{
 			response->catf("\"printTime\":%" PRIu32 ",", info.printTime);
@@ -2143,7 +2164,7 @@ bool RepRap::GetFileInfoResponse(const char *filename, OutputBuffer *&response, 
 		{
 			for (size_t i = 0; i < info.numFilaments; ++i)
 			{
-				response->catf("%c%.1f", ch, (double)info.filamentNeeded[i]);
+				response->catf("%c%.1f", ch, HideNan(info.filamentNeeded[i]));
 				ch = ',';
 			}
 		}
@@ -2174,22 +2195,26 @@ void RepRap::Beep(unsigned int freq, unsigned int ms)
 	ms = constrain<unsigned int>(ms, 10, 60000);
 
 	// If there is an LCD device present, make it beep
+	bool bleeped = false;
 #if SUPPORT_12864_LCD
 	if (display->IsPresent())
 	{
 		display->Beep(freq, ms);
+		bleeped = true;
 	}
-	else
 #endif
-		if (platform->HaveAux())
-		{
-			platform->Beep(freq, ms);
-		}
-		else
-		{
-			beepFrequency = freq;
-			beepDuration = ms;
-		}
+
+	if (platform->HaveAux())
+	{
+		platform->Beep(freq, ms);
+		bleeped = true;
+	}
+
+	if (!bleeped)
+	{
+		beepFrequency = freq;
+		beepDuration = ms;
+	}
 }
 
 // Send a short message. We send it to both PanelDue and the web interface.
@@ -2230,18 +2255,18 @@ char RepRap::GetStatusCharacter() const
 {
 	return    (processingConfig)										? 'C'	// Reading the configuration file
 			: (gCodes->IsFlashing())									? 'F'	// Flashing a new firmware binary
-					: (IsStopped()) 											? 'H'	// Halted
+			: (IsStopped()) 											? 'H'	// Halted
 #if HAS_VOLTAGE_MONITOR
-							: (!platform->HasVinPower() && !gCodes->IsSimulating())		? 'O'	// Off i.e. powered down
+			: (!platform->HasVinPower() && !gCodes->IsSimulating())		? 'O'	// Off i.e. powered down
 #endif
-									: (gCodes->IsPausing()) 									? 'D'	// Pausing / Decelerating
-											: (gCodes->IsResuming()) 									? 'R'	// Resuming
-													: (gCodes->IsPaused()) 										? 'S'	// Paused / Stopped
-															: (printMonitor->IsPrinting() && gCodes->IsSimulating())	? 'M'	// Simulating
-																	: (printMonitor->IsPrinting())							  	? 'P'	// Printing
-																			: (gCodes->IsDoingToolChange())								? 'T'	// Changing tool
-																					: (gCodes->DoingFileMacro() || !move->NoLiveMovement()) 	? 'B'	// Busy
-																							:															  'I';	// Idle
+			: (gCodes->IsPausing()) 									? 'D'	// Pausing / Decelerating
+			: (gCodes->IsResuming()) 									? 'R'	// Resuming
+			: (gCodes->IsPaused()) 										? 'S'	// Paused / Stopped
+			: (printMonitor->IsPrinting() && gCodes->IsSimulating())	? 'M'	// Simulating
+			: (printMonitor->IsPrinting())							  	? 'P'	// Printing
+			: (gCodes->IsDoingToolChange())								? 'T'	// Changing tool
+			: (gCodes->DoingFileMacro() || !move->NoLiveMovement()) 	? 'B'	// Busy
+			:															  'I';	// Idle
 }
 
 bool RepRap::NoPasswordSet() const
@@ -2378,14 +2403,27 @@ bool RepRap::WriteToolSettings(FileStore *f) const
 	{
 		if (t != currentTool)
 		{
-			ok = t->WriteSettings(f, false);
+			ok = t->WriteSettings(f);
 		}
 	}
 
-	// Finally write the setting of the active tool and the commands to select it
-	if (ok && currentTool != nullptr)
+	// Finally write the settings of the active tool and the commands to select it. If no current tool, just deselect all tools.
+	if (ok)
 	{
-		ok = currentTool->WriteSettings(f, true);
+		if (currentTool == nullptr)
+		{
+			ok = f->Write("T-1 P0\n");
+		}
+		else
+		{
+			ok = currentTool->WriteSettings(f);
+			if (ok)
+			{
+				String<StringLength20> buf;
+				buf.printf("T%u P0\n", currentTool->Number());
+				ok = f->Write(buf.c_str());
+			}
+		}
 	}
 	return ok;
 }

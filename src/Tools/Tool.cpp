@@ -158,6 +158,21 @@ Tool * Tool::freelist = nullptr;
 	}
 }
 
+/*static*/ AxesBitmap Tool::GetXAxes(const Tool *tool)
+{
+	return (tool == nullptr) ? DefaultXAxisMapping : tool->xMapping;
+}
+
+/*static*/ AxesBitmap Tool::GetYAxes(const Tool *tool)
+{
+	return (tool == nullptr) ? DefaultYAxisMapping : tool->yMapping;
+}
+
+/*static*/ float Tool::GetOffset(const Tool *tool, size_t axis)
+{
+	return (tool == nullptr) ? 0.0 : tool->offset[axis];
+}
+
 void Tool::Print(const StringRef& reply) const
 {
 	reply.printf("Tool %u - ", myNumber);
@@ -384,14 +399,13 @@ void Tool::DefineMix(const float m[])
 	}
 }
 
-// Write the tool's settings to file returning true if successful
-bool Tool::WriteSettings(FileStore *f, bool isCurrent) const
+// Write the tool's settings to file returning true if successful. The settings written leave the tool selected unless it is off.
+bool Tool::WriteSettings(FileStore *f) const
 {
-	char bufSpace[50];
-	StringRef buf(bufSpace, ARRAY_SIZE(bufSpace));
+	String<StringLength40> buf;
+	bool ok = true;
 
 	// Set up active and standby heater temperatures
-	bool ok = true;
 	if (heaterCount != 0)
 	{
 		buf.printf("G10 P%d ", myNumber);
@@ -414,9 +428,7 @@ bool Tool::WriteSettings(FileStore *f, bool isCurrent) const
 
 	if (ok && state != ToolState::off)
 	{
-		// Select tool. Don't run tool change files unless it is the current tool, and in that case don't run the tfree file.
-		buf.printf("T%d P%u\n", myNumber, (isCurrent) ? 6 : 0);
-		ok = f->Write(buf.c_str());
+		ok = buf.printf("T%d P0\n", myNumber);
 	}
 
 	return ok;

@@ -121,9 +121,9 @@ public:
 			float acceleration;											// the requested acceleration, for async moves
 		};
 		FilePosition filePos;											// offset in the file being printed at the start of reading this move
-		float proportionLeft;											// what proportion of the entire move remains after this segment
-		AxesBitmap xAxes;												// axes that X is mapped to
-		AxesBitmap yAxes;												// axes that Y is mapped to
+		float proportionDone;											// what proportion of the entire move has been done when this segment is complete
+		float initialUserX, initialUserY;								// if this is a segment of an arc move, the user X and Y coordinates at the start
+		const Tool *tool;												// which tool (if any) is being used
 		EndstopsBitmap endStopsToCheck;									// endstops to check
 #if SUPPORT_LASER || SUPPORT_IOBITS
 		LaserPwmOrIoBits laserPwmOrIoBits;								// the laser PWM or port bit settings required
@@ -208,7 +208,7 @@ public:
 	size_t GetVisibleAxes() const { return numVisibleAxes; }
 	size_t GetNumExtruders() const { return numExtruders; }
 
-	void FilamentError(size_t extruder, FilamentSensorStatus fstat, size_t  trigger);
+	void FilamentError(size_t extruder, FilamentSensorStatus fstat);
 	void HandleHeaterFault(int heater);									// Respond to a heater fault
 
 #if HAS_VOLTAGE_MONITOR
@@ -392,7 +392,8 @@ private:
 	GCodeResult SetOrReportZProbe(GCodeBuffer& gb, const StringRef &reply);		// Handle M558
 	GCodeResult DefineGrid(GCodeBuffer& gb, const StringRef &reply);			// Define the probing grid, returning true if error
 	GCodeResult LoadHeightMap(GCodeBuffer& gb, const StringRef& reply);			// Load the height map from file
-	bool SaveHeightMap(GCodeBuffer& gb, const StringRef& reply) const;			// Save the height map to file
+	bool TrySaveHeightMap(const char *filename, const StringRef& reply) const;	// Save the height map to the specified file
+	GCodeResult SaveHeightMap(GCodeBuffer& gb, const StringRef& reply) const;	// Save the height map to the file specified by P parameter
 	void ClearBedMapping();														// Stop using bed compensation
 	GCodeResult ProbeGrid(GCodeBuffer& gb, const StringRef& reply);				// Start probing the grid, returning true if we didn't because of an error
 	GCodeResult CheckOrConfigureTrigger(GCodeBuffer& gb, const StringRef& reply, int code);	// Handle M581 and M582
@@ -501,9 +502,12 @@ private:
 	unsigned int totalSegments;					// The total number of segments left in the complete move
 
 	unsigned int segmentsLeftToStartAt;
-	float moveFractionToStartAt;				// how much of the next move was printed before the power failure
 	float moveFractionToSkip;
 	float firstSegmentFractionToSkip;
+
+	float restartMoveFractionDone;				// how much of the next move was printed before the pause or power failure (from M26)
+	float restartInitialUserX;					// if the print was paused during an arc move, the user X coordinate at the start of that move (from M26)
+	float restartInitialUserY;					// if the print was paused during an arc move, the user X coordinate at the start of that move (from M26)
 
 	float arcCentre[MaxAxes];
 	float arcRadius;
@@ -614,7 +618,6 @@ private:
 	// Filament monitoring
 	FilamentSensorStatus lastFilamentError;
 	size_t lastFilamentErrorExtruder;
-	size_t lastFilamentErrorTrigger;
 
 	// Laser
 	float laserMaxPower;
@@ -666,8 +669,6 @@ private:
 #endif
 
 	static constexpr const float MinServoPulseWidth = 544.0, MaxServoPulseWidth = 2400.0;
-	static constexpr uint16_t ServoRefreshFrequency = 50;
-
 	String<MaxFilenameLength> loadedHeightmap;
 };
 

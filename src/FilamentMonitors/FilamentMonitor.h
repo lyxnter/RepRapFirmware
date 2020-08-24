@@ -66,8 +66,6 @@ public:
 	// Send diagnostics info
 	static void Diagnostics(MessageType mtype);
 
-	virtual size_t GetTrigger();
-
 protected:
 	FilamentMonitor(unsigned int extruder, int t) : extruderNumber(extruder), type(t), pin(NoPin) { }
 

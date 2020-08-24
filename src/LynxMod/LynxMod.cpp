@@ -521,7 +521,7 @@ struct Emission {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Emission Transmission;
 
-unsigned int micros() {return millis()*1000;} //(clock()*1000000)/CLOCKS_PER_SEC;};
+//unsigned int micros() {return millis()*1000;} //(clock()*1000000)/CLOCKS_PER_SEC;};
 
 LynxMod::LynxMod():
 																														filtrationFan(2),
@@ -1036,7 +1036,7 @@ void LynxMod::LynxDataLogs() {
 
 		// Position machine
 		float liveCoordinates[NumDirectDrivers];
-		reprap.GetMove().LiveCoordinates(liveCoordinates, reprap.GetCurrentXAxes(), reprap.GetCurrentYAxes());
+		//reprap.GetMove().LiveCoordinates(liveCoordinates, reprap.GetCurrentXAxes(), reprap.GetCurrentYAxes());
 		for (size_t drive = 0; drive < 3; drive++) {
 			SafeSnprintf(fl, FL_SIZE, "%.2f", (double)liveCoordinates[drive]);
 			strcat(log, fl);
@@ -1071,7 +1071,7 @@ void LynxMod::LynxM968(MessageType mtype){
 		//reprap.GetPlatform().MessageF(mtype, " M968 Trait&eacute;\n");
 		switch (Com){
 		case 0:
-			reprap.GetPlatform().MessageF(mtype, "S1: Ask for door to be open\n\t P<pin_number> ;Open door if pin is enabled");
+			reprap.GetPlatform().MessageF(mtype, "S1: Ask for door to be open\n\t P<pin_number> ;Open door if pin is enabled\n");
 			reprap.GetPlatform().MessageF(mtype, "S2: &empty; Report door safety sate\n\tP[1/0] ;Enable/Disable door safeties\n");
 			reprap.GetPlatform().MessageF(mtype, "S3: &empty; Reports error reporting state\n\tP[1/0] ;Enable/Disable LED display Error states\n");
 			break;

@@ -243,6 +243,10 @@ bool GCodes::HandleGcode(GCodeBuffer& gb, const StringRef& reply)
 				ClearBedMapping();
 				break;
 
+			case 3:		// save height map to names file
+				result = SaveHeightMap(gb, reply);
+				break;
+
 			default:
 				result = GCodeResult::badOrMissingParameter;
 				break;
@@ -426,9 +430,11 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 				}
 				break;
 
+#if SUPPORT_LASER
 			case MachineType::laser:
-				platform.SetLaserPwm(ConvertLaserPwm(gb.GetFValue()));
+				moveBuffer.laserPwmOrIoBits.laserPwm = ConvertLaserPwm(gb.GetFValue());
 				break;
+#endif
 
 			default:
 #if SUPPORT_ROLAND
@@ -498,9 +504,11 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 			}
 			break;
 
+#if SUPPORT_LASER
 		case MachineType::laser:
-			platform.SetLaserPwm(0);
+			moveBuffer.laserPwmOrIoBits.Clear();
 			break;
+#endif
 
 		default:
 #if SUPPORT_ROLAND
@@ -698,7 +706,16 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 			String<MaxFilenameLength> filename;
 			if (gb.GetUnprecedentedString(filename.GetRef()))
 			{
-				if (QueueFileToPrint(filename.c_str(), reply))
+#if SUPPORT_LYNXMOD
+					if (lynxMod.EnableSafeties && digitalRead(INPUT_DOOR_STATE)) { // lynxmod
+						reply.copy("Merci de fermer la porte avant de lancer l'impression\n");
+						//result = GCodeResult::error;
+					}
+#endif
+					if (QueueFileToPrint(filename.c_str(), reply)
+#if SUPPORT_LYNXMOD
+							&& (!lynxMod.EnableSafeties || !digitalRead(INPUT_DOOR_STATE))
+#endif
 				{
 					reprap.GetPrintMonitor().StartingPrint(filename.c_str());
 					if (platform.EmulatingMarlin() && (&gb == serialGCode || &gb == telnetGCode))
@@ -730,7 +747,17 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 		break;
 
 	case 24: // Print/resume-printing the selected file
-		if (IsPausing() || IsResuming())
+#if SUPPORT_LYNXMOD
+			if (digitalRead(INPUT_DOOR_STATE) && lynxMod.EnableSafeties) { // lynxmod
+				reply.copy("Merci de fermer la porte avant de reprendre l'impression\n");
+				result = GCodeResult::error;
+			}
+#endif
+		if (IsPausing() || IsResuming()
+#if SUPPORT_LYNXMOD
+					|| (lynxMod.EnableSafeties && digitalRead(INPUT_DOOR_STATE))
+#endif
+			)
 		{
 			// ignore the resume request
 		}
@@ -782,7 +809,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 						// We need to copy the absolute/relative and volumetric extrusion flags over
 						fileGCode->OriginalMachineState().CopyStateFrom(gb.MachineState());
 						fileToPrint.Seek(fileOffsetToPrint);
-						moveFractionToSkip = moveFractionToStartAt;
+						moveFractionToSkip = restartMoveFractionDone;
 					}
 					StartPrinting(fromStart);
 				}
@@ -856,10 +883,9 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 		if (gb.Seen('S'))
 		{
 			fileOffsetToPrint = (FilePosition)gb.GetUIValue();
-			if (gb.Seen('P'))
-			{
-				moveFractionToStartAt = constrain<float>(gb.GetFValue(), 0.0, 1.0);
-			}
+			restartMoveFractionDone = (gb.Seen('P')) ? constrain<float>(gb.GetFValue(), 0.0, 1.0) : 0.0;
+			restartInitialUserX = (gb.Seen('X')) ? gb.GetFValue() : 0.0;
+			restartInitialUserY = (gb.Seen('Y')) ? gb.GetFValue() : 0.0;
 		}
 		break;
 
@@ -1435,11 +1461,21 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 		break;
 
 	case 115: // Print firmware version or set hardware type
+#if defined(DUET_NG) || defined(DUET_06_085)
 		if (gb.Seen('P'))
 		{
-			platform.SetBoardType((BoardType)gb.GetIValue());
+			if (runningConfigFile)
+			{
+				platform.SetBoardType((BoardType)gb.GetIValue());
+			}
+			else
+			{
+				reply.copy("Board type can only be set within config.g");
+				result = GCodeResult::error;
+			}
 		}
 		else
+#endif
 		{
 			reply.printf("FIRMWARE_NAME: %s FIRMWARE_VERSION: %s ELECTRONICS: %s", FIRMWARE_NAME, VERSION, platform.GetElectronicsString());
 #ifdef DUET_NG
@@ -1601,6 +1637,10 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 					String<GCODE_LENGTH> message;
 					gb.GetQuotedString(message.GetRef());
 					platform.Message(type, message.c_str());
+					if (type != HttpMessage)
+					{
+						platform.Message(type, "\n");
+					}
 				}
 			}
 		}
@@ -2525,7 +2565,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 		break;
 
 	case 374: // Save grid and height map to file
-		result = GetGCodeResultFromError(SaveHeightMap(gb, reply));
+		result = SaveHeightMap(gb, reply);
 		break;
 
 	case 375: // Load grid and height map from file and enable compensation
@@ -2882,7 +2922,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 			}
 			String<MaxFilenameLength> path;
 			gb.GetQuotedString(path.GetRef());
-			platform.SetSysDir(path.c_str());
+			result = platform.SetSysDir(path.c_str(), reply);
 		}
 		else
 		{
@@ -3936,6 +3976,46 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 		result = FindCenterOfCavity(gb, reply);
 		break;
 
+			/* LYNXMOD */
+#if SUPPORT_LYNXMOD
+		case 680: // Set pin code for the Pannel Due (not in use anymore but kept)
+		{
+			String<5> oldPanelPin;
+			String<5> newPanelPin;
+			bool seen = false;
+			// Verification du password en P
+			gb.TryGetPossiblyQuotedString('P', oldPanelPin.GetRef(), seen);
+			if (seen) {
+				if (reprap.CheckPanelPin(oldPanelPin.c_str())) {
+					// Match
+					seen = false;
+					reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Panel pin match\n");
+					gb.TryGetPossiblyQuotedString('S', newPanelPin.GetRef(), seen);
+					if (seen) {
+						bool correct = true;
+						bool enabled = false;
+						for (unsigned char u=0;u<4;u++) {
+							if (newPanelPin.c_str()[u] < 48 || newPanelPin.c_str()[u] > 57) {
+								correct = false;
+							} else {
+								enabled = enabled?enabled:((newPanelPin.c_str()[u]-'0')!=0);
+							}
+						}
+						if (correct) {
+							newPanelPin[4] = 0;
+							if (enabled)
+								reprap.GetPlatform().MessageF(MessageType::HttpMessage, "New panel pin set (%s)\n", newPanelPin.c_str());
+							else
+								reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Panel pin disabled\n");
+							reprap.SetPanelPin(newPanelPin.c_str());
+						}
+					}
+				}
+			}
+		}
+		break;
+#endif
+
 	case 701: // Load filament
 		result = LoadFilament(gb, reply);
 		break;
@@ -4330,6 +4410,88 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 	case 929: // Start/stop event logging
 		result = platform.ConfigureLogging(gb, reply);
 		break;
+
+#if SUPPORT_LYNXMOD
+		case 968:
+
+			if (gb.Seen('S')) { // Parametre S
+				unsigned int val = gb.GetFValue();
+				lynxMod.ComC = 968;
+				lynxMod.Com = val;
+				//reprap.GetPlatform().MessageF(MessageType::HttpMessage, " M968 Recu (S%d detecte)\n", val);
+				lynxMod.ComP = -1;
+
+				if (lynxMod.Com == 1) {
+					String<5> oldPanelPin;
+					bool seen = false;
+					bool enabled = reprap.PanelPinEnabeled();
+					// Verification du password en P
+					gb.TryGetPossiblyQuotedString('P', oldPanelPin.GetRef(), seen);
+					if (seen || !enabled) {
+						if (reprap.CheckPanelPin(oldPanelPin.c_str()) || !enabled) {
+							// Match
+							seen = false;
+							reprap.GetPlatform().MessageF(MessageType::HttpMessage, "Panel pin match\n");
+							lynxMod.ComDate = millis();
+							lynxMod.LynxM968(MessageType::HttpMessage);
+						} else {
+							lynxMod.Com = -1;
+						}
+					}
+				} else {
+
+					if (gb.Seen('P')) { // Parametre P
+						int pval = gb.GetFValue();
+						lynxMod.ComP = pval;
+					}
+					lynxMod.ComDate = millis();
+					lynxMod.LynxM968(MessageType::HttpMessage);
+				}
+			}
+			break;
+		case 969: // Communication with LynxMod:lights
+			//reprap.GetPlatform().MessageF(, " M969 Recu\n");
+			if (gb.Seen('S')) { // Param\E8tre S
+				unsigned int val = gb.GetFValue();
+				lynxMod.ComP = -1;
+				if (gb.Seen('P')) { // Parametre P
+					unsigned int pval = gb.GetFValue();
+					lynxMod.ComP = pval;
+				}
+				for (int i = 0; i < 5; i++)
+					lynxMod.ComCol[i] = -1;
+				if (gb.Seen('R')) { // Parametre R
+					unsigned int rval = gb.GetFValue();
+					lynxMod.ComCol[0] = rval;
+					lynxMod.ComP = (lynxMod.ComP >= 0 ? lynxMod.ComP : -2);
+				}
+				if (gb.Seen('V')) { // Parametre V
+					unsigned int vval = gb.GetFValue();
+					lynxMod.ComCol[1] = vval;
+					lynxMod.ComP = (lynxMod.ComP >= 0 ? lynxMod.ComP : -2);
+				}
+				if (gb.Seen('B')) { // Parametre B
+					unsigned int bval = gb.GetFValue();
+					lynxMod.ComCol[2] = bval;
+					lynxMod.ComP = (lynxMod.ComP >= 0 ? lynxMod.ComP : -2);
+				}
+				if (gb.Seen('W')) { // Parametre W
+					unsigned int wval = gb.GetFValue();
+					lynxMod.ComCol[3] = wval;
+					lynxMod.ComP = (lynxMod.ComP >= 0 ? lynxMod.ComP : -2);
+				}
+				if (gb.Seen('L')) { // Parametre L
+					unsigned int lval = gb.GetFValue();
+					lynxMod.ComCol[4] = lval;
+					lynxMod.ComP = (lynxMod.ComP >= 0 ? lynxMod.ComP : -2);
+				}
+				lynxMod.ComC = 969;
+				lynxMod.Com = val;
+				lynxMod.ComDate = millis();
+				lynxMod.LynxM969(MessageType::HttpMessage);
+			}
+			break;
+#endif
 
 	case 997: // Perform firmware update
 		result = UpdateFirmware(gb, reply);

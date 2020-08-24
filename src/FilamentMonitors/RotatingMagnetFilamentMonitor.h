@@ -19,11 +19,8 @@ public:
 	FilamentSensorStatus Check(bool isPrinting, bool fromIsr, uint32_t isrMillis, float filamentConsumed) override;
 	FilamentSensorStatus Clear() override;
 	void Diagnostics(MessageType mtype, unsigned int extruder) override;
-	size_t GetTrigger() { return trigger; };
 
 private:
-	size_t trigger;
-
 	static constexpr float DefaultMmPerRev = 28.8;
 	static constexpr float DefaultMinMovementAllowed = 0.6;
 	static constexpr float DefaultMaxMovementAllowed = 1.6;
@@ -48,6 +45,8 @@ private:
 	// Definitions for info message types
 	static constexpr uint16_t TypeMagnetV2InfoTypeMask = 0x1F00;
 	static constexpr uint16_t TypeMagnetV2InfoTypeVersion = 0x0000;
+	static constexpr uint16_t TypeMagnetV3InfoTypeMagnitude = 0x0200;
+	static constexpr uint16_t TypeMagnetV3InfoTypeAgc = 0x0300;
 
 	static constexpr uint16_t TypeMagnetAngleMask = 0x03FF;			// we use a 10-bit sensor angle
 
@@ -81,6 +80,8 @@ private:
 	uint16_t switchOpenMask;								// mask to isolate the switch open bit(s) from the sensor value
 	uint8_t version;										// sensor/firmware version
 	uint8_t lastErrorCode;									// the last error code received
+	uint8_t magnitude;										// the last magnitude received (sensor firmware V3)
+	uint8_t agc;											// the last agc received (sensor firmware V3)
 	bool sensorError;										// true if received an error report (cleared by a position report)
 
 	bool wasPrintingAtStartBit;

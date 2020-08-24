@@ -275,17 +275,17 @@ void DDARing::TryStartNextMove(Platform& p, uint32_t startTime)
 	}
 	else
 	{
-		if (st == DDA::provisional)
-		{
-			++numPrepareUnderruns;					// there are more moves available, but they are not prepared yet. Signal an underrun.
-		}
-		p.ExtrudeOff();								// turn off ancillary PWM
 #if SUPPORT_LASER
 		if (reprap.GetGCodes().GetMachineType() == MachineType::laser)
 		{
 			p.SetLaserPwm(0);						// turn off the laser
 		}
 #endif
+		p.ExtrudeOff();								// turn off ancillary PWM
+		if (st == DDA::provisional)
+		{
+			++numPrepareUnderruns;					// there are more moves available, but they are not prepared yet. Signal an underrun.
+		}
 	}
 }
 
@@ -535,7 +535,7 @@ bool DDARing::PauseMoves(RestorePoint& rp)
 		rp.moveCoords[axis] = prevDda->GetEndCoordinate(axis, false);
 	}
 
-	reprap.GetMove().InverseAxisAndBedTransform(rp.moveCoords, prevDda->GetXAxes(), prevDda->GetYAxes());	// we assume that xAxes hasn't changed between the moves
+	reprap.GetMove().InverseAxisAndBedTransform(rp.moveCoords, prevDda->GetTool());
 
 #if SUPPORT_LASER || SUPPORT_IOBITS
 	rp.laserPwmOrIoBits = dda->GetLaserPwmOrIoBits();
@@ -548,6 +548,8 @@ bool DDARing::PauseMoves(RestorePoint& rp)
 
 	dda = addPointer;
 	rp.proportionDone = dda->GetProportionDone(false);	// get the proportion of the current multi-segment move that has been completed
+	rp.initialUserX = dda->GetInitialUserX();
+	rp.initialUserY = dda->GetInitialUserY();
 	if (dda->UsingStandardFeedrate())
 	{
 		rp.feedRate = dda->GetRequestedSpeed();
@@ -623,6 +625,8 @@ bool DDARing::LowPowerOrStallPause(RestorePoint& rp)
 	rp.virtualExtruderPosition = dda->GetVirtualExtruderPosition();
 	rp.filePos = dda->GetFilePosition();
 	rp.proportionDone = dda->GetProportionDone(abortedMove);	// store how much of the complete multi-segment move's extrusion has been done
+	rp.initialUserX = dda->GetInitialUserX();
+	rp.initialUserY = dda->GetInitialUserY();
 
 #if SUPPORT_LASER || SUPPORT_IOBITS
 	rp.laserPwmOrIoBits = dda->GetLaserPwmOrIoBits();
@@ -638,7 +642,7 @@ bool DDARing::LowPowerOrStallPause(RestorePoint& rp)
 		rp.moveCoords[axis] = prevDda->GetEndCoordinate(axis, false);
 	}
 
-	reprap.GetMove().InverseAxisAndBedTransform(rp.moveCoords, prevDda->GetXAxes(), prevDda->GetYAxes());	// we assume that xAxes and yAxes have't changed between the moves
+	reprap.GetMove().InverseAxisAndBedTransform(rp.moveCoords, prevDda->GetTool());
 
 	// Free the DDAs for the moves we are going to skip
 	for (dda = addPointer; dda != savedDdaRingAddPointer; dda = dda->GetNext())

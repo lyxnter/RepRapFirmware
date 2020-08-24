@@ -111,7 +111,7 @@ namespace DuetExpansion
 			ret = dueXnExpander.begin(DueXnAddress);
 		} while (!ret && attempts < 5);
 		(void)I2C_IFACE.GetErrorCounts(true);				// clear the error counts in case there wasn't a device there or we didn't find it first time
-		//ret = false; // LYNXMOD
+
 		if (ret)
 		{
 			dueXnExpander.pinModeMultiple(BoardTypePins, INPUT_PULLUP);
@@ -131,10 +131,20 @@ namespace DuetExpansion
 			dueXnExpander.pinModeMultiple(AllFanBits, OUTPUT_PWM_LOW);		// Initialise the PWM pins
 			const uint16_t stopBits = (dueXnBoardType == ExpansionBoardType::DueX5) ? AllStopBitsX5 : AllStopBitsX2;	// I am assuming that the X0 has 2 endstop inputs
 			dueXnExpander.pinModeMultiple(stopBits | AllGpioBits, INPUT);	// Initialise the endstop inputs and GPIO pins (no pullups because 5V-tolerant)
-
-			// Set up the interrupt on any input change
 			dueXnInputMask = stopBits | AllGpioBits;
 			dueXnExpander.enableInterruptMultiple(dueXnInputMask, INTERRUPT_MODE_CHANGE);
+		}
+
+		return dueXnBoardType;
+	}
+
+	// Create the DueXn task and enable the associated interrupt from the DueXn.
+	// This must be called after interrupt priorities have been configured, to comply with FreeRTOS constraints.
+	void DueXnTaskInit()
+	{
+		if (dueXnBoardType != ExpansionBoardType::none)
+		{
+			// Set up the interrupt on any input change
 			attachInterrupt(DueX_INT, DueXIrq, InterruptMode::INTERRUPT_MODE_FALLING, nullptr);
 
 			// Clear any initial interrupts
@@ -143,8 +153,6 @@ namespace DuetExpansion
 			dueXTask = new Task<DueXTaskStackWords>();
 			dueXTask->Create(DueXTask, "DUEX", nullptr, TaskPriority::DueXPriority);
 		}
-
-		return dueXnBoardType;
 	}
 
 	// Look for an additional output pin expander
@@ -161,7 +169,7 @@ namespace DuetExpansion
 			ret = additionalIoExpander.begin(AdditionalIoExpanderAddress);
 		} while (!ret && attempts < 5);
 		(void)I2C_IFACE.GetErrorCounts(true);				// clear the error counts in case there wasn't a device there or we didn't find it first time
-		//ret = false; // LYNXMOD
+
 		if (ret)
 		{
 			additionalIoExpander.pinModeMultiple((1u << 16) - 1, INPUT_PULLDOWN);

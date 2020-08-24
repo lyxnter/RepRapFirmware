@@ -19,8 +19,6 @@ public:
 
 	bool Interrupt() override;
 
-	size_t GetTrigger() { return trigger; };
-
 protected:
 	void InitReceiveBuffer();
 
@@ -39,8 +37,6 @@ protected:
 	uint32_t polarityErrorCount;
 
 private:
-	size_t trigger;
-
 	static constexpr size_t EdgeCaptureBufferSize = 64;				// must be a power of 2
 
 	// Buffer used to capture received data, and associated info

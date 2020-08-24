@@ -11,6 +11,7 @@
 #include "Move.h"
 #include "StepTimer.h"
 #include "Kinematics/LinearDeltaKinematics.h"		// for DELTA_AXES
+#include "Tools/Tool.h"
 
 #if SUPPORT_CAN_EXPANSION
 # include "CAN/CanInterface.h"
@@ -306,7 +307,7 @@ bool DDA::InitStandardMove(DDARing& ring, GCodes::RawMove &nextMove, bool doMoto
 				{
 					const float positionDelta = endCoordinates[drive] - prev->GetEndCoordinate(drive, false);
 					directionVector[drive] = positionDelta;
-					if (positionDelta != 0.0 && (IsBitSet(nextMove.yAxes, drive) || IsBitSet(nextMove.xAxes, drive)))
+					if (positionDelta != 0.0 && (IsBitSet(Tool::GetXAxes(nextMove.tool), drive) || IsBitSet(Tool::GetYAxes(nextMove.tool), drive)))
 					{
 						flags.xyMoving = true;
 					}
@@ -365,13 +366,12 @@ bool DDA::InitStandardMove(DDARing& ring, GCodes::RawMove &nextMove, bool doMoto
 	}
 
 	// 3. Store some values
-	xAxes = nextMove.xAxes;
-	yAxes = nextMove.yAxes;
+	tool = nextMove.tool;
 	flags.usesEndstops = (nextMove.endStopsToCheck != 0);
 	endStopsToCheck = nextMove.endStopsToCheck;					//TODO move this to DDARing
 	filePos = nextMove.filePos;
 	virtualExtruderPosition = nextMove.virtualExtruderPosition;
-	proportionLeft = nextMove.proportionLeft;
+	proportionDone = nextMove.proportionDone;
 
 	flags.canPauseAfter = nextMove.canPauseAfter;
 	flags.usingStandardFeedrate = nextMove.usingStandardFeedrate;
@@ -381,14 +381,20 @@ bool DDA::InitStandardMove(DDARing& ring, GCodes::RawMove &nextMove, bool doMoto
 	flags.hadLookaheadUnderrun = false;
 	flags.isLeadscrewAdjustmentMove = false;
 	flags.goingSlow = false;
-	flags.controlLaser = true;
 
 	// The end coordinates will be valid at the end of this move if it does not involve endstop checks and is not a raw motor move
 	flags.endCoordinatesValid = (endStopsToCheck == 0) && doMotorMapping;
 	flags.continuousRotationShortcut = (nextMove.moveType == 0);
 
-#if SUPPORT_IOBITS
-	laserPwmOrIoBits = nextMove.laserPwmOrIoBits;
+#if SUPPORT_LASER || SUPPORT_IOBITS
+	if (nextMove.isCoordinated && endStopsToCheck == 0)
+	{
+		laserPwmOrIoBits = nextMove.laserPwmOrIoBits;
+	}
+	else
+	{
+		laserPwmOrIoBits.Clear();
+	}
 #endif
 
 	// If it's a Z probing move, limit the Z acceleration to better handle nozzle-contact probes
@@ -521,7 +527,6 @@ bool DDA::InitLeadscrewMove(DDARing& ring, float feedrate, const float adjustmen
 	flags.isDeltaMovement = false;
 	flags.isPrintingMove = false;
 	flags.xyMoving = false;
-	flags.controlLaser = false;
 	flags.canPauseAfter = true;
 	flags.usingStandardFeedrate = false;
 	flags.usePressureAdvance = false;
@@ -530,8 +535,7 @@ bool DDA::InitLeadscrewMove(DDARing& ring, float feedrate, const float adjustmen
 	flags.continuousRotationShortcut = false;
 	endStopsToCheck = 0;
 	virtualExtruderPosition = prev->virtualExtruderPosition;
-	xAxes = prev->xAxes;
-	yAxes = prev->yAxes;
+	tool = nullptr;
 	filePos = prev->filePos;
 	flags.endCoordinatesValid = prev->flags.endCoordinatesValid;
 	acceleration = deceleration = reprap.GetPlatform().Accelerations()[Z_AXIS];
@@ -1486,6 +1490,8 @@ float DDA::NormaliseXYZ()
 	// First calculate the magnitude of the vector. If there is more than one X or Y axis, take an average of their movements (they should be equal).
 	float xMagSquared = 0.0, yMagSquared = 0.0;
 	unsigned int numXaxes = 0, numYaxes = 0;
+	const AxesBitmap xAxes = Tool::GetXAxes(tool);
+	const AxesBitmap yAxes = Tool::GetYAxes(tool);
 	for (size_t d = 0; d < MaxAxes; ++d)
 	{
 		if (IsBitSet(xAxes, d))
@@ -1678,7 +1684,7 @@ pre(state == frozen)
 
 #if SUPPORT_LASER
 	// Deal with laser power
-	if (reprap.GetGCodes().GetMachineType() == MachineType::laser && flags.controlLaser)
+	if (reprap.GetGCodes().GetMachineType() == MachineType::laser)
 	{
 		// Ideally we should ramp up the laser power as the machine accelerates, but for now we don't.
 		p.SetLaserPwm(laserPwmOrIoBits.laserPwm);
@@ -1876,14 +1882,13 @@ void DDA::MoveAborted()
 float DDA::GetProportionDone(bool moveWasAborted) const
 {
 	// Get the proportion of extrusion already done at the start of this segment
-	float proportionDone = (filePos != noFilePosition && filePos == prev->filePos)
-									? 1.0 - prev->proportionLeft
+	float proportionDoneSoFar = (filePos != noFilePosition && filePos == prev->filePos)
+									? prev->proportionDone
 										: 0.0;
 	if (moveWasAborted)
 	{
 		// The move was aborted, so subtract how much was done
-		const float proportionDoneAtEnd = 1.0 - proportionLeft;
-		if (proportionDoneAtEnd > proportionDone)
+		if (proportionDone > proportionDoneSoFar)
 		{
 			int32_t taken = 0, left = 0;
 			for (size_t drive = reprap.GetGCodes().GetTotalAxes(); drive < NumDirectDrivers; ++drive)
@@ -1898,11 +1903,11 @@ float DDA::GetProportionDone(bool moveWasAborted) const
 			const int32_t total = taken + left;
 			if (total > 0)										// if the move has net extrusion
 			{
-				proportionDone += (((proportionDoneAtEnd - proportionDone) * taken) + (total/2)) / total;
+				proportionDoneSoFar += (((proportionDone - proportionDoneSoFar) * taken) + (total/2)) / total;
 			}
 		}
 	}
-	return proportionDone;
+	return proportionDoneSoFar;
 }
 
 // Reduce the speed of this move to the indicated speed.

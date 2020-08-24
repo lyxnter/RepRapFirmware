@@ -552,22 +552,6 @@ bool HttpResponder::GetJsonResponse(const char* request, OutputBuffer *&response
 		const bool flagDirs = flagDirsVal != nullptr && SafeStrtol(flagDirsVal) == 1;
 		response = reprap.GetFilesResponse(dir, startAt, flagDirs);				// this may return nullptr
 	}
-	else if (StringEqualsIgnoreCase(request, "fileinfo"))
-	{
-		const char* const nameVal = GetKeyValue("name");
-		if (nameVal != nullptr)
-		{
-			// Regular rr_fileinfo?name=xxx call
-			filenameBeingProcessed.copy(nameVal);
-		}
-		else
-		{
-			// Simple rr_fileinfo call to get info about the file being printed
-			filenameBeingProcessed.Clear();
-		}
-		responderState = ResponderState::gettingFileInfo;
-		return false;
-	}
 	else if (StringEqualsIgnoreCase(request, "move"))
 	{
 		const char* const oldVal = GetKeyValue("old");
@@ -593,6 +577,22 @@ bool HttpResponder::GetJsonResponse(const char* request, OutputBuffer *&response
 			success = GetPlatform().GetMassStorage()->MakeDirectory(dirVal);
 		}
 		response->printf("{\"err\":%d}", (success) ? 0 : 1);
+	}
+	else if (StringEqualsIgnoreCase(request, "fileinfo"))
+	{
+		const char* const nameVal = GetKeyValue("name");
+		if (nameVal != nullptr)
+		{
+			// Regular rr_fileinfo?name=xxx call
+			filenameBeingProcessed.copy(nameVal);
+		}
+		else
+		{
+			// Simple rr_fileinfo call to get info about the file being printed
+			filenameBeingProcessed.Clear();
+		}
+		responderState = ResponderState::gettingFileInfo;
+		return false;
 	}
 	else if (StringEqualsIgnoreCase(request, "config"))
 	{
@@ -834,10 +834,6 @@ void HttpResponder::SendFile(const char* nameOfFileToSend, bool isWebFile)
 	{
 		contentType = "text/plain";
 	}
-	else if (StringEndsWithIgnoreCase(nameOfFileToSend, ".svg"))
-	{
-		contentType = "image/svg+xml";
-	}
 	else
 	{
 		contentType = "application/octet-stream";
@@ -919,14 +915,6 @@ void HttpResponder::SendJsonResponse(const char* command)
 		if (StringEqualsIgnoreCase(command, "reply"))			// rr_reply
 		{
 			SendGCodeReply();
-			return;
-		}
-
-		if (StringEqualsIgnoreCase(command, "configfile"))	// rr_configfile [DEPRECATED]
-		{
-			String<MaxFilenameLength> fileName;
-			GetPlatform().MakeSysFileName(fileName.GetRef(), GetPlatform().GetConfigFile());
-			SendFile(fileName.c_str(), false);
 			return;
 		}
 
@@ -1167,15 +1155,21 @@ void HttpResponder::ProcessRequest()
 						return;
 					}
 
+					// Try to get the expected CRC
+					const char* const expectedCrc = GetKeyValue("crc32");
+					postFileGotCrc = (expectedCrc != nullptr);
+					if (postFileGotCrc)
+					{
+						postFileExpectedCrc = SafeStrtoul(expectedCrc, nullptr, 16);
+					}
+
 					// Start a new file upload
-					FileStore *file = GetPlatform().OpenFile(FS_PREFIX, filename, OpenMode::write, postFileLength);
+					FileStore * const file = StartUpload(FS_PREFIX, filename, (postFileGotCrc) ? OpenMode::writeWithCrc : OpenMode::write, postFileLength);
 					if (file == nullptr)
 					{
 						RejectMessage("could not create file");
 						return;
-
 					}
-					StartUpload(file, filename);
 
 					// Try to get the last modified file date and time
 					const char* const lastModifiedString = GetKeyValue("time");
@@ -1206,7 +1200,7 @@ void HttpResponder::ProcessRequest()
 					// Keep track of the connection that is now uploading
 					const IPAddress remoteIP = GetRemoteIP();
 					const uint16_t remotePort = skt->GetRemotePort();
-					for(size_t i = 0; i < numSessions; i++)
+					for (size_t i = 0; i < numSessions; i++)
 					{
 						if (sessions[i].ip == remoteIP)
 						{
@@ -1301,7 +1295,7 @@ void HttpResponder::DoUpload()
 			}
 		}
 
-		FinishUpload(postFileLength, fileLastModified);
+		FinishUpload(postFileLength, fileLastModified, postFileGotCrc, postFileExpectedCrc);
 		SendJsonResponse("upload");
 	}
 }
@@ -1378,9 +1372,13 @@ void HttpResponder::Diagnostics(MessageType mt) const
 				// No more space available, stop here
 				return;
 			}
-			gcodeReply.Push(buffer);
+			if (!gcodeReply.Push(buffer))
+			{
+				// Can't push, so buffer was discarded. Don't append to it.
+				return;
+			}
 		}
-
+		buffer->catf("%lu: ", seq);
 		buffer->cat(reply);
 		clientsServed = 0;
 		seq++;
@@ -1410,6 +1408,7 @@ void HttpResponder::Diagnostics(MessageType mt) const
 }
 
 
+// Check for timed out sessions and old reply buffers
 /*static*/ void HttpResponder::CheckSessions()
 {
 	unsigned int clientsTimedOut = 0;
@@ -1419,7 +1418,6 @@ void HttpResponder::Diagnostics(MessageType mt) const
 		--i;
 		if ((now - sessions[i].lastQueryTime) > HttpSessionTimeout)
 		{
-			// Check for timed out sessions
 			for (size_t k = i + 1; k < numSessions; k++)
 			{
 				sessions[k - 1] = sessions[k];
@@ -1432,21 +1430,38 @@ void HttpResponder::Diagnostics(MessageType mt) const
 	// If we cannot send the G-Code reply to anyone, we may free up some run-time space by dumping it
 	if (clientsTimedOut != 0)
 	{
-		MutexLocker lock(gcodeReplyMutex);
-
-		clientsServed += clientsTimedOut;			// assume the disconnected clients haven't fetched the G-Code reply yet
-		if (numSessions == 0 || clientsServed >= numSessions)
+		bool released = false;
 		{
-			while (!gcodeReply.IsEmpty())
+			MutexLocker lock(gcodeReplyMutex);
+
+			clientsServed += clientsTimedOut;			// assume the disconnected clients haven't fetched the G-Code reply yet
+			if (numSessions == 0 || clientsServed >= numSessions)
 			{
-				OutputBuffer *buf = gcodeReply.Pop();
-				OutputBuffer::ReleaseAll(buf);
+				while (!gcodeReply.IsEmpty())
+				{
+					OutputBuffer *buf = gcodeReply.Pop();
+					OutputBuffer::ReleaseAll(buf);
+				}
+				released = true;
 			}
 			clientsServed = 0;
-			if (reprap.Debug(moduleWebserver))
-			{
-				debugPrintf("Released gcodeReply, free buffers=%u\n", OutputBuffer::GetFreeBuffers());
-			}
+		}
+		if (released && reprap.Debug(moduleWebserver))
+		{
+			debugPrintf("Released gcodeReply, free buffers=%u\n", OutputBuffer::GetFreeBuffers());
+		}
+	}
+	else if (!gcodeReply.IsEmpty())
+	{
+		// Check whether we can time out any GCode buffers
+		bool released;
+		{
+			MutexLocker lock(gcodeReplyMutex);
+			released = gcodeReply.ApplyTimeout(HttpSessionTimeout);
+		}
+		if (released && reprap.Debug(moduleWebserver))
+		{
+			debugPrintf("Timed out gcodeReply, free buffers=%u\n", OutputBuffer::GetFreeBuffers());
 		}
 	}
 }

@@ -368,6 +368,7 @@ bool OutputBuffer::WriteToFile(FileData& f) const
 			buf->references = 1;					// assume it's only used once by default
 			buf->isReferenced = false;
 			buf->hadOverflow = false;
+			buf->whenQueued = millis();				// use the time of allocation as the default when-used time
 
 			return true;
 		}
@@ -469,8 +470,8 @@ bool OutputBuffer::WriteToFile(FileData& f) const
 //*************************************************************************************************
 // OutputStack class implementation
 
-// Push an OutputBuffer chain to the stack
-void OutputStack::Push(OutputBuffer *buffer) volatile
+// Push an OutputBuffer chain. Return true if successful, else release the buffer and return false.
+bool OutputStack::Push(OutputBuffer *buffer) volatile
 {
 	if (buffer != nullptr)
 	{
@@ -481,12 +482,13 @@ void OutputStack::Push(OutputBuffer *buffer) volatile
 			{
 				buffer->whenQueued = millis();
 				items[count++] = buffer;
-				return;
+				return true;
 			}
 		}
 		OutputBuffer::ReleaseAll(buffer);
 		reprap.GetPlatform().LogError(ErrorCode::OutputStackOverflow);
 	}
+	return false;
 }
 
 // Pop an OutputBuffer chain or return nullptr if none is available
@@ -515,18 +517,42 @@ OutputBuffer *OutputStack::GetFirstItem() const volatile
 	return (count == 0) ? nullptr : items[0];
 }
 
-// Update the first item of the stack
-void OutputStack::SetFirstItem(OutputBuffer *buffer) volatile
+// Release the first item at the top of the stack
+void OutputStack::ReleaseFirstItem() volatile
 {
-	if (buffer == nullptr)
+	if (count != 0)
 	{
-		(void)Pop();
+		OutputBuffer * const buf = items[0];					// capture volatile variable
+		if (buf != nullptr)
+		{
+			items[0] = OutputBuffer::Release(buf);
+		}
+		if (items[0] == nullptr)
+		{
+			(void)Pop();
+		}
 	}
-	else
+}
+
+// Release the first item on the top of the stack if it is too old. Return true if the item was timed out or was null.
+bool OutputStack::ApplyTimeout(uint32_t ticks) volatile
+{
+	bool ret = false;
+	if (count != 0)
 	{
-		items[0] = buffer;
-		buffer->whenQueued = millis();
+		OutputBuffer * buf = items[0];							// capture volatile variable
+		while (buf != nullptr && millis() - buf->whenQueued >= ticks)
+		{
+			items[0] = buf = OutputBuffer::Release(buf);
+			ret = true;
+		}
+		if (items[0] == nullptr)
+		{
+			(void)Pop();
+			ret = true;
+		}
 	}
+	return ret;
 }
 
 // Returns the last item from the stack or nullptr if none is available

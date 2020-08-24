@@ -129,8 +129,8 @@ class OutputStack
 		// Clear the reference list
 		void Clear() volatile { count = 0; }
 
-		// Push an OutputBuffer chain
-		void Push(OutputBuffer *buffer) volatile;
+		// Push an OutputBuffer chain. Return true if successful, else release the buffer and return false.
+		bool Push(OutputBuffer *buffer) volatile;
 
 		// Pop an OutputBuffer chain or return NULL if none is available
 		OutputBuffer *Pop() volatile;
@@ -138,8 +138,11 @@ class OutputStack
 		// Returns the first item from the stack or NULL if none is available
 		OutputBuffer *GetFirstItem() const volatile;
 
-		// Set the first item of the stack. If it's NULL, then the first item will be removed
-		void SetFirstItem(OutputBuffer *buffer) volatile;
+		// Release the first item at the top of the stack
+		void ReleaseFirstItem() volatile;
+
+		// Apply a timeout to the first item at the top of the stack
+		bool ApplyTimeout(uint32_t ticks) volatile;
 
 		// Returns the last item from the stack or NULL if none is available
 		OutputBuffer *GetLastItem() const volatile;
